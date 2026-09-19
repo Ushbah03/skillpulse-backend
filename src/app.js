@@ -37,6 +37,15 @@ app.get('/', (req, res) => {
   });
 });
 
+app.get('/api', (req, res) => {
+  res.json({
+    success: true,
+    message: 'SkillPulse AI API Root Endpoint',
+    health: '/api/health',
+    status: 'ONLINE'
+  });
+});
+
 // Health Check
 app.get('/api/health', (req, res) => {
   res.json({
