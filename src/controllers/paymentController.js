@@ -59,11 +59,32 @@ export const createCheckoutSession = async (req, res, next) => {
       }
     }
 
-    // Fallback Mode (Instant Demo Workspace Activation if Stripe Key is unconfigured/invalid)
-    const targetPlan = plan === 'Enterprise AI' ? 'ENTERPRISE' : plan === 'Starter' ? 'STARTER' : 'PRO';
-    const targetSeats = seats || (plan === 'Enterprise AI' ? 1000 : plan === 'Professional' ? 250 : 30);
+    // Fallback Mode (Redirect to Built-in Payment Checkout Page if Stripe Key is unconfigured/invalid)
+    const checkoutUrl = `${clientUrl}/checkout?tenantId=${tenantId}&plan=${encodeURIComponent(plan || 'Starter')}&seats=${seats || 30}`;
+    return res.json({ 
+      success: true, 
+      url: checkoutUrl,
+      isSimulated: true,
+      message: 'Redirecting to Payment Checkout'
+    });
+  } catch (error) {
+    console.error('Checkout error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
-    await prisma.tenant.update({
+export const completeSimulatedCheckout = async (req, res, next) => {
+  try {
+    const { tenantId, plan, seats } = req.body;
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant workspace not found' });
+    }
+
+    const targetPlan = plan === 'Enterprise AI' ? 'ENTERPRISE' : plan === 'Starter' ? 'STARTER' : 'PRO';
+    const targetSeats = parseInt(seats) || (plan === 'Enterprise AI' ? 1000 : plan === 'Professional' ? 250 : 30);
+
+    const updatedTenant = await prisma.tenant.update({
       where: { id: tenantId },
       data: {
         plan: targetPlan,
@@ -72,15 +93,13 @@ export const createCheckoutSession = async (req, res, next) => {
       }
     });
 
-    const fallbackUrl = `${clientUrl}/login?signup=success&tenant=${tenantId}`;
-    return res.json({ 
-      success: true, 
-      url: fallbackUrl,
-      isSimulated: true,
-      message: 'Workspace activated successfully (Demo Mode)'
+    res.json({
+      success: true,
+      message: 'Payment successfully processed! Organization workspace activated.',
+      tenant: updatedTenant
     });
   } catch (error) {
-    console.error('Checkout error:', error);
+    console.error('Complete checkout error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
