@@ -1,7 +1,8 @@
 import prisma from '../config/db.js';
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const stripeKey = process.env.STRIPE_SECRET_KEY || 'sk_test_dummy_key_for_development';
+const stripe = new Stripe(stripeKey);
 
 export const createCheckoutSession = async (req, res, next) => {
   try {
