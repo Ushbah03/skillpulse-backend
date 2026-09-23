@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import prisma from '../config/db.js';
+import { sendEmail } from '../utils/sendEmail.js';
 
 export const login = async (req, res, next) => {
   try {
@@ -298,9 +299,40 @@ export const forgotPassword = async (req, res, next) => {
     const clientUrl = (req.headers.origin || process.env.CLIENT_URL || 'https://skillpulse-ai.vercel.app').replace(/\/$/, '');
     const resetUrl = `${clientUrl}/forgot-password?token=${rawToken}&email=${encodeURIComponent(user.email)}`;
 
+    const emailSubject = 'SkillPulse AI — Reset Your Password';
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; background-color: #0F172A; color: #FFFFFF; padding: 30px; border-radius: 16px; max-width: 550px; margin: 0 auto; border: 1px solid rgba(255,255,255,0.1);">
+        <h2 style="color: #6366F1; margin-bottom: 8px;">SkillPulse AI</h2>
+        <h3 style="margin-top: 0; font-size: 20px;">Password Recovery Request</h3>
+        <p style="color: #94A3B8; font-size: 14px; line-height: 1.6;">
+          Hello ${user.firstName || 'User'},<br/>
+          We received a request to reset your password for your SkillPulse AI account (<strong>${user.email}</strong>). Click the button below to choose a new password:
+        </p>
+        <div style="margin: 28px 0; text-align: center;">
+          <a href="${resetUrl}" style="background-color: #4F46E5; color: #FFFFFF; padding: 14px 32px; text-decoration: none; border-radius: 30px; font-weight: bold; display: inline-block; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);">
+            Reset Password Now →
+          </a>
+        </div>
+        <p style="color: #64748B; font-size: 12px;">Or copy and paste this link in your web browser:<br/>
+          <a href="${resetUrl}" style="color: #818CF8; word-break: break-all;">${resetUrl}</a>
+        </p>
+        <p style="color: #64748B; font-size: 12px; margin-top: 24px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;">
+          This security link expires in 60 minutes. If you did not request a password reset, you can safely ignore this email.
+        </p>
+      </div>
+    `;
+
+    // Attempt email dispatch
+    await sendEmail({
+      to: user.email,
+      subject: emailSubject,
+      html: emailHtml,
+      text: `Reset your SkillPulse AI password here: ${resetUrl}`
+    });
+
     res.json({
       success: true,
-      message: 'Password reset link generated successfully.',
+      message: 'Password reset link dispatched successfully to your email.',
       resetToken: rawToken,
       resetUrl,
       email: user.email

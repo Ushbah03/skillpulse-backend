@@ -28,6 +28,7 @@
     "jsonwebtoken": "^9.0.2",
     "mammoth": "^1.12.1",
     "morgan": "^1.10.0",
+    "nodemailer": "^10.0.10",
     "stripe": "^22.6.0",
     "ws": "^8.21.3",
     "zod": "^3.24.2"
