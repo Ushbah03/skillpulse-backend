@@ -144,6 +144,9 @@ model User {
   ssoProvider      String?            // e.g. "google", "microsoft", "workday"
   ssoId            String?
   
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  
   departmentId     String?
   department       Department?        @relation("DepartmentMembers", fields: [departmentId], references: [id], onDelete: SetNull)
   

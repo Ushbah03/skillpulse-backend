@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import prisma from '../config/db.js';
 
 export const login = async (req, res, next) => {
@@ -259,6 +260,111 @@ export const getMe = async (req, res, next) => {
     });
 
     res.json({ success: true, user });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email address is required.' });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { email: email.toLowerCase().trim() }
+    });
+
+    if (!user) {
+      return res.json({ 
+        success: true, 
+        message: 'If an account with that email exists, recovery instructions have been dispatched.' 
+      });
+    }
+
+    // Generate secure random reset token and 1-hour expiration
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken: rawToken,
+        resetTokenExpiry
+      }
+    });
+
+    const clientUrl = (req.headers.origin || process.env.CLIENT_URL || 'https://skillpulse-ai.vercel.app').replace(/\/$/, '');
+    const resetUrl = `${clientUrl}/forgot-password?token=${rawToken}&email=${encodeURIComponent(user.email)}`;
+
+    res.json({
+      success: true,
+      message: 'Password reset link generated successfully.',
+      resetToken: rawToken,
+      resetUrl,
+      email: user.email
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resetPassword = async (req, res, next) => {
+  try {
+    const { token, newPassword, email } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Token and new password are required.' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+    }
+
+    let whereClause = { resetToken: token };
+    if (email) {
+      whereClause.email = email.toLowerCase().trim();
+    }
+
+    const user = await prisma.user.findFirst({
+      where: whereClause
+    });
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired password reset token.' });
+    }
+
+    if (user.resetTokenExpiry && new Date() > new Date(user.resetTokenExpiry)) {
+      return res.status(400).json({ success: false, message: 'Password reset token has expired. Please request a new link.' });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        resetToken: null,
+        resetTokenExpiry: null
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: user.tenantId,
+        userId: user.id,
+        action: 'PASSWORD_RESET_SUCCESS',
+        resource: 'User',
+        resourceId: user.id,
+        details: { email: user.email },
+        ipAddress: req.ip
+      }
+    });
+
+    res.json({
+      success: true,
+      message: 'Password successfully updated. You can now log in with your new password.'
+    });
   } catch (error) {
     next(error);
   }
