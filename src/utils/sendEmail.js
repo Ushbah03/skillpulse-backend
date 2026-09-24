@@ -3,7 +3,7 @@ import { Resend } from 'resend';
 
 /**
  * Send transactional emails via Resend API or Nodemailer SMTP (e.g. Gmail)
- * Falls back safely if credentials are missing without breaking app execution.
+ * Safe fallback for serverless environments (Vercel / AWS Lambda).
  */
 export const sendEmail = async ({ to, subject, html, text }) => {
   const resendApiKey = process.env.RESEND_API_KEY;
@@ -20,7 +20,9 @@ export const sendEmail = async ({ to, subject, html, text }) => {
         text
       });
       console.log(`[Resend Email Dispatched] to ${to}:`, data);
-      return { success: true, data };
+      if (data && data.data && data.data.id) {
+        return { success: true, data: data.data };
+      }
     } catch (error) {
       console.error(`[Resend Dispatch Error] Failed to send email to ${to}:`, error.message);
     }
@@ -28,7 +30,7 @@ export const sendEmail = async ({ to, subject, html, text }) => {
 
   // 2. Try Nodemailer SMTP
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = parseInt(process.env.SMTP_PORT || '465', 10);
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
   const user = process.env.SMTP_USER || process.env.EMAIL_USER;
   const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS;
   const from = process.env.EMAIL_FROM || (user ? `SkillPulse AI <${user}>` : '"SkillPulse AI" <no-reply@skillpulse.ai>');
@@ -39,15 +41,23 @@ export const sendEmail = async ({ to, subject, html, text }) => {
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: {
-        user,
-        pass,
-      },
-    });
+    // Standardized Gmail service transport for Vercel Serverless (AWS Lambda)
+    const isGmail = host.includes('gmail');
+    const transporterConfig = isGmail
+      ? {
+          service: 'gmail',
+          auth: { user, pass },
+          tls: { rejectUnauthorized: false }
+        }
+      : {
+          host,
+          port,
+          secure: port === 465,
+          auth: { user, pass },
+          tls: { rejectUnauthorized: false }
+        };
+
+    const transporter = nodemailer.createTransport(transporterConfig);
 
     const info = await transporter.sendMail({
       from,
