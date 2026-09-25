@@ -134,8 +134,9 @@ export const deleteUserSkill = async (req, res, next) => {
 export const getMySkillGaps = async (req, res, next) => {
   try {
     const userId = req.user.id;
+    const tenantId = req.user.tenantId || req.tenantId;
 
-    const gaps = await prisma.skillGap.findMany({
+    let gaps = await prisma.skillGap.findMany({
       where: { userId },
       include: {
         skill: { include: { category: true } },
@@ -143,6 +144,61 @@ export const getMySkillGaps = async (req, res, next) => {
       },
       orderBy: { severity: 'asc' }
     });
+
+    // Auto-fix missing or mismatched assignedCourseId on SkillGaps
+    for (const gap of gaps) {
+      const skillName = gap.skill?.name || 'Technical';
+      const categoryName = gap.skill?.category?.name || 'General';
+      const courseTitle = `${skillName} Mastery & Practical Application`;
+
+      const isMismatched = gap.assignedCourse && !gap.assignedCourse.title.toLowerCase().includes(skillName.toLowerCase());
+
+      if (!gap.assignedCourse || isMismatched) {
+        let matchingCourse = await prisma.course.findFirst({
+          where: { title: { equals: courseTitle, mode: 'insensitive' } }
+        });
+
+        if (!matchingCourse) {
+          let videoUrl = 'https://www.youtube-nocookie.com/embed/c9Wg6Cb_YlU';
+          const lowerS = skillName.toLowerCase();
+          if (lowerS.includes('react') || lowerS.includes('hook') || lowerS.includes('frontend')) {
+            videoUrl = 'https://www.youtube-nocookie.com/embed/w7ejDZ8SWv8';
+          } else if (lowerS.includes('canva')) {
+            videoUrl = 'https://www.youtube-nocookie.com/embed/un50Bs4BvZ8';
+          } else if (lowerS.includes('figma') || lowerS.includes('design') || lowerS.includes('ux')) {
+            videoUrl = 'https://www.youtube-nocookie.com/embed/c9Wg6Cb_YlU';
+          } else if (lowerS.includes('problem') || lowerS.includes('critical')) {
+            videoUrl = 'https://www.youtube-nocookie.com/embed/v34nQJeic88';
+          }
+
+          matchingCourse = await prisma.course.create({
+            data: {
+              tenantId: tenantId || null,
+              title: courseTitle,
+              description: `Comprehensive training program designed to eliminate skill gaps in ${skillName}. Includes hands-on projects and video modules.`,
+              provider: 'SkillPulse Academy',
+              durationHours: 12.0,
+              level: gap.severity === 'CRITICAL' ? 'Advanced' : 'Intermediate',
+              rating: 4.9,
+              externalUrl: videoUrl,
+              skillsTaught: {
+                create: [
+                  { skillId: gap.skillId, targetProficiency: gap.requiredLevel || 4.5 }
+                ]
+              }
+            }
+          });
+        }
+
+        await prisma.skillGap.update({
+          where: { id: gap.id },
+          data: { assignedCourseId: matchingCourse.id }
+        }).catch(() => {});
+
+        gap.assignedCourse = matchingCourse;
+        gap.assignedCourseId = matchingCourse.id;
+      }
+    }
 
     res.json({ success: true, count: gaps.length, data: gaps });
   } catch (error) {
