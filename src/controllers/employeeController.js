@@ -1,6 +1,7 @@
 import prisma from '../config/db.js';
 import { generateAIQuestionsForSkill } from '../services/aiQuestionService.js';
 import { generateAiCompletion } from '../services/aiService.js';
+import { extractSkillsSmart } from '../utils/skillExtractor.js';
 
 export const getMySkillProfile = async (req, res, next) => {
   try {
@@ -892,10 +893,20 @@ ProficiencyLevel must be a float between 1.0 (Beginner) and 5.0 (Master).`;
     if (aiRes?.content) {
       try {
         const cleanJsonStr = aiRes.content.replace(/```json/gi, '').replace(/```/g, '').trim();
-        extractedSkills = JSON.parse(cleanJsonStr);
+        const jsonMatch = cleanJsonStr.match(/\[[\s\S]*\]/);
+        const parseTarget = jsonMatch ? jsonMatch[0] : cleanJsonStr;
+        const parsed = JSON.parse(parseTarget);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          extractedSkills = parsed;
+        }
       } catch (parseErr) {
         console.warn('AI Extraction JSON Parse Warning:', parseErr.message);
       }
+    }
+
+    if (!Array.isArray(extractedSkills) || extractedSkills.length === 0) {
+      console.log('AI Extraction fallback to Smart Skill Extraction Engine...');
+      extractedSkills = extractSkillsSmart(text);
     }
 
     if (!Array.isArray(extractedSkills) || extractedSkills.length === 0) {

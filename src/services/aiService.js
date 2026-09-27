@@ -19,7 +19,7 @@ const getGroqClient = () => {
 export const generateAiCompletion = async ({
   prompt,
   systemPrompt = 'You are SkillPulse AI, an objective talent assessment engine.',
-  model = process.env.GROQ_MODEL || 'groq/compound',
+  model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
   temperature = 0.2,
   maxTokens = 2048,
   provider = 'Groq'
@@ -43,7 +43,7 @@ export const generateAiCompletion = async ({
           { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt }
         ],
-        model: model || 'groq/compound',
+        model: model === 'groq/compound' ? 'llama-3.3-70b-versatile' : model,
         temperature,
         max_tokens: maxTokens
       });
