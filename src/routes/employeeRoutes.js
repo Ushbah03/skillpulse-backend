@@ -4,6 +4,7 @@ import {
   addOrUpdateSkill,
   deleteUserSkill,
   aiExtractSkills,
+  getAiCareerAdvisorAdvice,
   getMySkillGaps,
   getMyLearningRecommendations,
   enrollCourse,
@@ -23,6 +24,7 @@ router.get('/profile', getMySkillProfile);
 router.post('/skills', addOrUpdateSkill);
 router.delete('/skills/:userSkillId', deleteUserSkill);
 router.post('/ai-extract-skills', aiExtractSkills);
+router.get('/ai-career-advice', getAiCareerAdvisorAdvice);
 router.get('/gaps', getMySkillGaps);
 router.get('/learning', getMyLearningRecommendations);
 router.post('/enroll', enrollCourse);

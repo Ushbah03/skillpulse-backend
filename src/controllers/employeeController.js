@@ -995,4 +995,85 @@ ProficiencyLevel must be a float between 1.0 (Beginner) and 5.0 (Master).`;
   }
 };
 
+export const getAiCareerAdvisorAdvice = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const userWithData = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        skills: { include: { skill: { include: { category: true } } } },
+        skillGaps: { include: { skill: true } }
+      }
+    });
+
+    if (!userWithData) {
+      return res.status(404).json({ success: false, message: 'User profile not found' });
+    }
+
+    const jobTitle = userWithData.jobTitle || 'Software Engineer';
+    const userSkills = userWithData.skills.map(s => `${s.skill?.name} (Level: ${s.proficiencyLevel}/5.0, Category: ${s.skill?.category?.name || 'Technical'})`);
+    const activeGaps = userWithData.skillGaps.map(g => `${g.skill?.name} (Current: ${g.currentLevel}, Target: ${g.requiredLevel}, Severity: ${g.severity})`);
+
+    const prompt = `Analyze this employee's live skill profile and provide strategic career advisor guidance:
+Job Title: ${jobTitle}
+Verified Skills Inventory (${userSkills.length}): ${userSkills.join(', ') || 'No verified skills yet'}
+Active Skill Gaps (${activeGaps.length}): ${activeGaps.join(', ') || 'No active gaps'}
+
+Return a STRICT JSON object with these exact keys:
+{
+  "title": "Focus Track: <Skill or Focus Area>",
+  "text": "<1-2 sentences of actionable AI strategic career guidance explaining how bridging this gap improves readiness>",
+  "roleAlignmentIndex": 86,
+  "careerGoal": "Senior ${jobTitle}",
+  "readinessBoostPct": 25
+}`;
+
+    const systemPrompt = "You are SkillPulse AI Career Advisor, an executive HR talent coach. Return valid JSON only.";
+
+    const aiRes = await generateAiCompletion({
+      prompt,
+      systemPrompt,
+      temperature: 0.3,
+      maxTokens: 500
+    });
+
+    let adviceObj = null;
+    if (aiRes?.content) {
+      try {
+        const cleanStr = aiRes.content.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const jsonMatch = cleanStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          adviceObj = JSON.parse(jsonMatch[0]);
+        }
+      } catch (err) {
+        console.warn('AI Career Advice parse error:', err.message);
+      }
+    }
+
+    if (!adviceObj) {
+      const topGap = userWithData.skillGaps[0];
+      const gapSkillName = topGap?.skill?.name || (userSkills.length > 0 ? userSkills[0].split(' ')[0] : 'Strategic Leadership');
+      const severity = topGap?.severity || 'CRITICAL';
+      const boost = topGap ? Math.round(((topGap.requiredLevel - topGap.currentLevel) / 5.0) * 100) : 25;
+
+      adviceObj = {
+        title: `Focus Track: ${gapSkillName}`,
+        text: `Bridging your ${severity} priority gap in ${gapSkillName} will increase your promotion readiness index by +${boost || 25}%.`,
+        roleAlignmentIndex: Math.min(95, Math.max(50, Math.round((userSkills.length / 10) * 100) || 75)),
+        careerGoal: `Senior ${jobTitle}`,
+        readinessBoostPct: boost || 25
+      };
+    }
+
+    return res.json({
+      success: true,
+      data: adviceObj
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
 
