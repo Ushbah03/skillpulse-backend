@@ -312,8 +312,42 @@ export const getMyLearningRecommendations = async (req, res, next) => {
       });
     }
 
+    const gapSkillNames = userGaps.map(g => (g.skill?.name || '').toLowerCase());
+    const gapSkillMap = new Map(userGaps.map(g => [(g.skill?.name || '').toLowerCase(), g.severity]));
+
     const formatted = courses.map(course => {
       const enrollment = course.enrollments[0] || null;
+      const courseSkills = course.skillsTaught.map(st => st.skill?.name || '');
+      const courseTitleLower = (course.title || '').toLowerCase();
+      const courseDescLower = (course.description || '').toLowerCase();
+
+      // Calculate Dynamic AI Match Score for THIS user
+      let matchScore = 72; // Baseline catalog score
+      let matchedGap = null;
+      let isGapMatch = false;
+
+      for (const gapSkill of gapSkillNames) {
+        if (
+          courseSkills.some(s => s.toLowerCase().includes(gapSkill)) ||
+          courseTitleLower.includes(gapSkill) ||
+          courseDescLower.includes(gapSkill)
+        ) {
+          isGapMatch = true;
+          matchedGap = gapSkill;
+          const severity = gapSkillMap.get(gapSkill);
+          if (severity === 'CRITICAL') {
+            matchScore += 26; // Up to 98-99%
+          } else if (severity === 'HIGH') {
+            matchScore += 21; // Up to 93-95%
+          } else {
+            matchScore += 16; // Up to 88-90%
+          }
+          break;
+        }
+      }
+
+      matchScore = Math.min(99, Math.max(75, matchScore + Math.floor((course.rating || 4.5) * 1.5)));
+
       return {
         id: course.id,
         title: course.title,
@@ -324,11 +358,17 @@ export const getMyLearningRecommendations = async (req, res, next) => {
         rating: course.rating,
         externalUrl: course.externalUrl || 'https://www.youtube-nocookie.com/embed/c9Wg6Cb_YlU',
         isCompliance: course.isCompliance,
-        skillsTaught: course.skillsTaught.map(st => st.skill.name),
+        skillsTaught: courseSkills,
         enrollmentStatus: enrollment ? enrollment.status : 'NOT_STARTED',
-        progressPct: enrollment ? enrollment.progressPct : 0
+        progressPct: enrollment ? enrollment.progressPct : 0,
+        matchScore: matchScore,
+        isGapMatch: isGapMatch,
+        matchedGapSkill: matchedGap
       };
     });
+
+    // SORT BY AI MATCH SCORE DESCENDING (User's skill gap resolution courses first!)
+    formatted.sort((a, b) => b.matchScore - a.matchScore);
 
     res.json({ success: true, count: formatted.length, data: formatted });
   } catch (error) {
