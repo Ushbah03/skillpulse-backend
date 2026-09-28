@@ -1075,5 +1075,109 @@ Return a STRICT JSON object with these exact keys:
   }
 };
 
+export const generateAiLearningRoadmap = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const userWithGaps = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        skills: { include: { skill: { include: { category: true } } } },
+        skillGaps: { include: { skill: true } }
+      }
+    });
+
+    if (!userWithGaps) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const jobTitle = userWithGaps.jobTitle || 'Software Engineer';
+    const userSkills = userWithGaps.skills.map(s => s.skill?.name).filter(Boolean);
+    const gapsList = userWithGaps.skillGaps.map(g => `${g.skill?.name} (Current: ${g.currentLevel}, Target: ${g.requiredLevel})`);
+
+    const prompt = `Generate a structured 30-Day Personalized Learning Roadmap for an employee with:
+Job Title: ${jobTitle}
+Current Verified Skills: ${userSkills.join(', ') || 'General Development'}
+Active Skill Gaps: ${gapsList.join(', ') || 'Advanced Leadership & System Architecture'}
+
+Return a STRICT JSON object matching this schema:
+{
+  "summary": "30-day intensive learning trajectory to bridge critical skill gaps and elevate promotion readiness.",
+  "targetRole": "Senior ${jobTitle}",
+  "estimatedCompletionDays": 30,
+  "weeklyMilestones": [
+    {
+      "week": 1,
+      "focus": "Core Fundamentals & Concept Mastery",
+      "action": "Complete video modules on primary gap skills and complete practice quizzes.",
+      "recommendedSkill": "${gapsList[0]?.split(' ')[0] || 'Core Architecture'}"
+    },
+    {
+      "week": 2,
+      "focus": "Hands-On Practical Implementation",
+      "action": "Build a hands-on project applying modern patterns and tools.",
+      "recommendedSkill": "${gapsList[0]?.split(' ')[0] || 'Technical Implementation'}"
+    },
+    {
+      "week": 3,
+      "focus": "Advanced Problem Solving & Optimization",
+      "action": "Conduct code reviews and optimize query performance and system architecture.",
+      "recommendedSkill": "${gapsList[1]?.split(' ')[0] || 'System Optimization'}"
+    },
+    {
+      "week": 4,
+      "focus": "Capstone Assessment & Skill Verification",
+      "action": "Take SkillPulse AI Skill Assessment exam to achieve 80%+ score and earn verified certificate.",
+      "recommendedSkill": "Skill Certification"
+    }
+  ]
+}`;
+
+    const systemPrompt = "You are SkillPulse AI Executive Learning Coach. Return valid JSON only.";
+
+    const aiRes = await generateAiCompletion({
+      prompt,
+      systemPrompt,
+      temperature: 0.3,
+      maxTokens: 800
+    });
+
+    let roadmapData = null;
+    if (aiRes?.content) {
+      try {
+        const cleanStr = aiRes.content.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const jsonMatch = cleanStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          roadmapData = JSON.parse(jsonMatch[0]);
+        }
+      } catch (err) {
+        console.warn('Roadmap parse warning:', err.message);
+      }
+    }
+
+    if (!roadmapData) {
+      const primaryGap = userWithGaps.skillGaps[0]?.skill?.name || 'Workplace Communication';
+      roadmapData = {
+        summary: `30-Day structured learning plan focused on bridging your critical skill gap in ${primaryGap}.`,
+        targetRole: `Senior ${jobTitle}`,
+        estimatedCompletionDays: 30,
+        weeklyMilestones: [
+          { week: 1, focus: `Fundamentals of ${primaryGap}`, action: "Watch recommended LMS video courses & complete chapter quizzes.", recommendedSkill: primaryGap },
+          { week: 2, focus: "Practical Scenario Execution", action: "Apply learning in real-world team projects.", recommendedSkill: primaryGap },
+          { week: 3, focus: "Advanced Mastery & Best Practices", action: "Review case studies and refine workflows.", recommendedSkill: primaryGap },
+          { week: 4, focus: "Skill Verification Exam", action: "Take assessment to verify skill level in DB.", recommendedSkill: "Verification" }
+        ]
+      };
+    }
+
+    res.json({
+      success: true,
+      data: roadmapData
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 
