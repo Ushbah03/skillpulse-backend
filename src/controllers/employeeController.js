@@ -312,6 +312,14 @@ export const getMyLearningRecommendations = async (req, res, next) => {
       });
     }
 
+    // Fetch user details for role alignment
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { designation: true, department: { select: { name: true } } }
+    });
+    const userRole = (user?.designation || '').toLowerCase();
+    const userDept = (user?.department?.name || '').toLowerCase();
+
     const gapSkillNames = userGaps.map(g => (g.skill?.name || '').toLowerCase());
     const gapSkillMap = new Map(userGaps.map(g => [(g.skill?.name || '').toLowerCase(), g.severity]));
 
@@ -321,11 +329,13 @@ export const getMyLearningRecommendations = async (req, res, next) => {
       const courseTitleLower = (course.title || '').toLowerCase();
       const courseDescLower = (course.description || '').toLowerCase();
 
-      // Calculate Dynamic AI Match Score for THIS user
-      let matchScore = 72; // Baseline catalog score
+      // Multi-Factor AI Recommendation Scoring Engine
+      let matchScore = 75; // Baseline catalog score
       let matchedGap = null;
       let isGapMatch = false;
+      let aiReason = '📚 General Catalog Course';
 
+      // Factor 1: Active DB Skill Gap Match (Highest Weight)
       for (const gapSkill of gapSkillNames) {
         if (
           courseSkills.some(s => s.toLowerCase().includes(gapSkill)) ||
@@ -336,17 +346,38 @@ export const getMyLearningRecommendations = async (req, res, next) => {
           matchedGap = gapSkill;
           const severity = gapSkillMap.get(gapSkill);
           if (severity === 'CRITICAL') {
-            matchScore += 26; // Up to 98-99%
+            matchScore = 99;
+            aiReason = `🎯 Resolves CRITICAL Gap: ${gapSkill.toUpperCase()}`;
           } else if (severity === 'HIGH') {
-            matchScore += 21; // Up to 93-95%
+            matchScore = 95;
+            aiReason = `⚡ Resolves HIGH Gap: ${gapSkill.toUpperCase()}`;
           } else {
-            matchScore += 16; // Up to 88-90%
+            matchScore = 91;
+            aiReason = `✨ Resolves Skill Gap: ${gapSkill.toUpperCase()}`;
           }
           break;
         }
       }
 
-      matchScore = Math.min(99, Math.max(75, matchScore + Math.floor((course.rating || 4.5) * 1.5)));
+      // Factor 2: Job Designation & Department Alignment
+      if (!isGapMatch) {
+        const isRoleMatched = (userRole && (courseTitleLower.includes(userRole) || courseDescLower.includes(userRole))) ||
+                             (userDept && (courseTitleLower.includes(userDept) || courseDescLower.includes(userDept)));
+
+        if (isRoleMatched) {
+          matchScore = 88;
+          aiReason = `🚀 Role Fit: Aligns with ${user?.designation || user?.department?.name || 'Career'} Trajectory`;
+        } else if (courseTitleLower.includes('communication') || courseTitleLower.includes('problem') || courseTitleLower.includes('mastery')) {
+          matchScore = 86;
+          aiReason = `💡 Core Competency: Recommended for Core Skill Mastery`;
+        } else if (courseTitleLower.includes('figma') || courseTitleLower.includes('design') || courseTitleLower.includes('docker') || courseTitleLower.includes('aws') || courseTitleLower.includes('react')) {
+          matchScore = 83;
+          aiReason = `⚡ High Demand: Trending Industry Competency`;
+        } else {
+          matchScore = 78 + Math.floor((course.rating || 4.5) * 1.2);
+          aiReason = `📚 Catalog Course`;
+        }
+      }
 
       return {
         id: course.id,
@@ -363,14 +394,26 @@ export const getMyLearningRecommendations = async (req, res, next) => {
         progressPct: enrollment ? enrollment.progressPct : 0,
         matchScore: matchScore,
         isGapMatch: isGapMatch,
-        matchedGapSkill: matchedGap
+        matchedGapSkill: matchedGap,
+        aiReason: aiReason
       };
     });
 
-    // SORT BY AI MATCH SCORE DESCENDING (User's skill gap resolution courses first!)
+    // SORT BY AI MATCH SCORE DESCENDING
     formatted.sort((a, b) => b.matchScore - a.matchScore);
 
-    res.json({ success: true, count: formatted.length, data: formatted });
+    // Tag Top 5 Recommendations dynamically
+    const finalRecommendations = formatted.map((item, idx) => ({
+      ...item,
+      isTopAiRecommendation: idx < 5,
+      aiRank: idx < 5 ? idx + 1 : null
+    }));
+
+    res.json({
+      success: true,
+      count: finalRecommendations.length,
+      data: finalRecommendations
+    });
   } catch (error) {
     next(error);
   }
