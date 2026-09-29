@@ -317,9 +317,9 @@ export const getMyLearningRecommendations = async (req, res, next) => {
     // Fetch user details for role alignment
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { designation: true, department: { select: { name: true } } }
+      select: { jobTitle: true, department: { select: { name: true } } }
     });
-    const userRole = (user?.designation || '').toLowerCase();
+    const userRole = (user?.jobTitle || '').toLowerCase();
     const userDept = (user?.department?.name || '').toLowerCase();
 
     const gapSkillNames = userGaps.map(g => (g.skill?.name || '').toLowerCase());
@@ -368,7 +368,7 @@ export const getMyLearningRecommendations = async (req, res, next) => {
 
         if (isRoleMatched) {
           matchScore = 88;
-          aiReason = `🚀 Role Fit: Aligns with ${user?.designation || user?.department?.name || 'Career'} Trajectory`;
+          aiReason = `🚀 Role Fit: Aligns with ${user?.jobTitle || user?.department?.name || 'Career'} Trajectory`;
         } else if (courseTitleLower.includes('communication') || courseTitleLower.includes('problem') || courseTitleLower.includes('mastery')) {
           matchScore = 86;
           aiReason = `💡 Core Competency: Recommended for Core Skill Mastery`;
