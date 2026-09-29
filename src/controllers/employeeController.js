@@ -440,7 +440,7 @@ export const enrollCourse = async (req, res, next) => {
         userId_courseId: { userId, courseId }
       },
       update: {
-        status: 'NOT_STARTED',
+        status: 'ENROLLED',
         courseTitle: courseObj?.title || undefined
       },
       create: {
@@ -448,7 +448,7 @@ export const enrollCourse = async (req, res, next) => {
         userId,
         courseId,
         courseTitle: courseObj?.title || null,
-        status: 'NOT_STARTED',
+        status: 'ENROLLED',
         progressPct: 0.0
       },
       include: { course: true }
