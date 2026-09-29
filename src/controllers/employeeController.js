@@ -384,9 +384,11 @@ export const getMyLearningRecommendations = async (req, res, next) => {
       }
 
       const rawStatus = enrollment ? enrollment.status : 'NOT_ENROLLED';
-      const isPending = rawStatus === 'NOT_STARTED';
-      const isApproved = rawStatus === 'ENROLLED' || rawStatus === 'IN_PROGRESS' || (enrollment && enrollment.progressPct > 0);
-      const isCompleted = rawStatus === 'COMPLETED' || (enrollment && enrollment.progressPct >= 100);
+      const progressPct = enrollment ? enrollment.progressPct : 0;
+      const isRejected = progressPct === -1.0;
+      const isPending = !isRejected && (rawStatus === 'NOT_STARTED' || rawStatus === 'PENDING');
+      const isApproved = !isRejected && (rawStatus === 'ENROLLED' || rawStatus === 'IN_PROGRESS' || progressPct > 0);
+      const isCompleted = !isRejected && (rawStatus === 'COMPLETED' || progressPct >= 100);
 
       return {
         id: course.id,
@@ -399,13 +401,14 @@ export const getMyLearningRecommendations = async (req, res, next) => {
         externalUrl: course.externalUrl || 'https://www.youtube-nocookie.com/embed/c9Wg6Cb_YlU',
         isCompliance: course.isCompliance,
         skillsTaught: courseSkills,
-        enrollmentStatus: rawStatus,
+        enrollmentStatus: isRejected ? 'REJECTED' : rawStatus,
         isPending: isPending,
         isApproved: isApproved,
+        isRejected: isRejected,
         isCompleted: isCompleted,
         hasTeam: hasTeam,
         approvalTarget: approvalTarget,
-        progressPct: enrollment ? enrollment.progressPct : 0,
+        progressPct: isRejected ? 0 : progressPct,
         matchScore: matchScore,
         isGapMatch: isGapMatch,
         matchedGapSkill: matchedGap,

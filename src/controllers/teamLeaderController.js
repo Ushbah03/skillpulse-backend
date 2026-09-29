@@ -1199,16 +1199,17 @@ export const updateTrainingRequestStatus = async (req, res, next) => {
           where: { OR: [{ tenantId: user.tenantId || tenantId }, { tenantId: null }] }
         });
         if (defaultCourse) {
-          const prismaStatus = status === 'Approved' ? 'IN_PROGRESS' : status === 'Completed' ? 'COMPLETED' : status === 'Rejected' ? 'REJECTED' : 'ENROLLED';
+          const prismaStatus = status === 'Approved' ? 'IN_PROGRESS' : status === 'Completed' ? 'COMPLETED' : 'NOT_STARTED';
+          const targetProgress = status === 'Completed' ? 100.0 : status === 'Rejected' ? -1.0 : 0.0;
           targetEnrollment = await prisma.learningEnrollment.upsert({
             where: { userId_courseId: { userId: user.id, courseId: defaultCourse.id } },
-            update: { status: prismaStatus },
+            update: { status: prismaStatus, progressPct: targetProgress },
             create: {
               tenantId: user.tenantId || tenantId,
               userId: user.id,
               courseId: defaultCourse.id,
               status: prismaStatus,
-              progressPct: status === 'Completed' ? 100.0 : 0.0
+              progressPct: targetProgress
             }
           });
           return res.json({ success: true, message: `Request status updated to ${status} in database.`, data: targetEnrollment });
@@ -1217,15 +1218,17 @@ export const updateTrainingRequestStatus = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Training request enrollment record not found.' });
     }
 
-    let prismaStatus = 'ENROLLED';
+    let prismaStatus = 'NOT_STARTED';
     let progressPct = targetEnrollment.progressPct;
     if (status === 'Approved') {
       prismaStatus = 'IN_PROGRESS';
+      progressPct = 0.0;
     } else if (status === 'Completed') {
       prismaStatus = 'COMPLETED';
       progressPct = 100.0;
     } else if (status === 'Rejected') {
-      prismaStatus = 'REJECTED';
+      prismaStatus = 'NOT_STARTED';
+      progressPct = -1.0;
     }
 
     const updated = await prisma.learningEnrollment.update({
