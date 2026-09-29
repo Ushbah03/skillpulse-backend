@@ -222,15 +222,8 @@ export const getMyLearningRecommendations = async (req, res, next) => {
 
     const gapSkillIds = userGaps.map(g => g.skillId);
 
-    // Find courses that teach these skills or general catalog
+    // Find all LMS catalog courses and user gap-targeted courses
     let courses = await prisma.course.findMany({
-      where: {
-        OR: [
-          { tenantId },
-          { tenantId: null },
-          { skillsTaught: { some: { skillId: { in: gapSkillIds } } } }
-        ]
-      },
       include: {
         skillsTaught: {
           include: { skill: true }
@@ -240,6 +233,22 @@ export const getMyLearningRecommendations = async (req, res, next) => {
         }
       }
     });
+
+    // If catalog has 0 courses, auto-seed default platform catalog courses
+    if (courses.length === 0) {
+      const defaultCatalog = [
+        { title: 'Workplace Communication Mastery & Practical Application', provider: 'SkillPulse Academy', durationHours: 12, level: 'Intermediate', rating: 4.9, externalUrl: 'https://www.youtube-nocookie.com/embed/v34nQJeic88', description: 'Comprehensive training on workplace communication and collaboration.' },
+        { title: 'Figma UI/UX Design Masterclass', provider: 'YouTube Educational LMS', durationHours: 12, level: 'Intermediate', rating: 4.9, externalUrl: 'https://www.youtube-nocookie.com/embed/c9Wg6Cb_YlU', description: 'Complete UI/UX design workflow using Figma.' },
+        { title: 'Canva Graphic & Presentation Design', provider: 'YouTube Educational LMS', durationHours: 8.5, level: 'Beginner', rating: 4.8, externalUrl: 'https://www.youtube-nocookie.com/embed/un50Bs4BvZ8', description: 'Visual design and presentation creation with Canva.' },
+        { title: 'Docker & Containerization Fundamentals', provider: 'YouTube Educational LMS', durationHours: 10.5, level: 'Intermediate', rating: 4.8, externalUrl: 'https://www.youtube-nocookie.com/embed/fqMOX6JJhGo', description: 'Containerize applications and deploy with Docker.' },
+        { title: 'AWS Cloud Practitioner & Architecture', provider: 'YouTube Educational LMS', durationHours: 20, level: 'Advanced', rating: 4.9, externalUrl: 'https://www.youtube-nocookie.com/embed/k1RI5locZE4', description: 'Cloud architecture fundamentals on AWS.' },
+        { title: 'Vue.js 3 & Pinia Modern Frontend Development', provider: 'YouTube Educational LMS', durationHours: 13, level: 'Intermediate', rating: 4.7, externalUrl: 'https://www.youtube-nocookie.com/embed/FXpIoQ_rT_c', description: 'Build reactive web interfaces using Vue 3 and Pinia.' }
+      ];
+
+      for (const item of defaultCatalog) {
+        await prisma.course.create({ data: item }).catch(() => {});
+      }
+    }
 
     // If catalog has few courses, auto-generate courses tailored to user's exact SkillGaps!
     if (courses.length < userGaps.length || courses.length === 0) {
@@ -294,13 +303,6 @@ export const getMyLearningRecommendations = async (req, res, next) => {
 
       // Re-fetch updated courses
       courses = await prisma.course.findMany({
-        where: {
-          OR: [
-            { tenantId },
-            { tenantId: null },
-            { skillsTaught: { some: { skillId: { in: gapSkillIds } } } }
-          ]
-        },
         include: {
           skillsTaught: {
             include: { skill: true }
