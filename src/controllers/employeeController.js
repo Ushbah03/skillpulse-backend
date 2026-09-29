@@ -464,6 +464,7 @@ export const enrollCourse = async (req, res, next) => {
       },
       update: {
         status: 'NOT_STARTED',
+        progressPct: 0.0,
         courseTitle: courseObj?.title || undefined
       },
       create: {
