@@ -1199,7 +1199,7 @@ export const updateTrainingRequestStatus = async (req, res, next) => {
           where: { OR: [{ tenantId: user.tenantId || tenantId }, { tenantId: null }] }
         });
         if (defaultCourse) {
-          const prismaStatus = status === 'Approved' ? 'IN_PROGRESS' : status === 'Completed' ? 'COMPLETED' : status === 'Rejected' ? 'NOT_STARTED' : 'ENROLLED';
+          const prismaStatus = status === 'Approved' ? 'IN_PROGRESS' : status === 'Completed' ? 'COMPLETED' : status === 'Rejected' ? 'REJECTED' : 'ENROLLED';
           targetEnrollment = await prisma.learningEnrollment.upsert({
             where: { userId_courseId: { userId: user.id, courseId: defaultCourse.id } },
             update: { status: prismaStatus },
@@ -1225,7 +1225,7 @@ export const updateTrainingRequestStatus = async (req, res, next) => {
       prismaStatus = 'COMPLETED';
       progressPct = 100.0;
     } else if (status === 'Rejected') {
-      prismaStatus = 'NOT_STARTED';
+      prismaStatus = 'REJECTED';
     }
 
     const updated = await prisma.learningEnrollment.update({

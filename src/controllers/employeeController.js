@@ -384,8 +384,10 @@ export const getMyLearningRecommendations = async (req, res, next) => {
       }
 
       const rawStatus = enrollment ? enrollment.status : 'NOT_ENROLLED';
-      const isPending = rawStatus === 'PENDING' || rawStatus === 'NOT_STARTED';
+      const isPending = rawStatus === 'PENDING';
       const isApproved = rawStatus === 'ENROLLED' || rawStatus === 'IN_PROGRESS' || (enrollment && enrollment.progressPct > 0);
+      const isRejected = rawStatus === 'REJECTED' || rawStatus === 'DENIED';
+      const isCompleted = rawStatus === 'COMPLETED' || (enrollment && enrollment.progressPct >= 100);
 
       return {
         id: course.id,
@@ -401,6 +403,8 @@ export const getMyLearningRecommendations = async (req, res, next) => {
         enrollmentStatus: rawStatus,
         isPending: isPending,
         isApproved: isApproved,
+        isRejected: isRejected,
+        isCompleted: isCompleted,
         hasTeam: hasTeam,
         approvalTarget: approvalTarget,
         progressPct: enrollment ? enrollment.progressPct : 0,
