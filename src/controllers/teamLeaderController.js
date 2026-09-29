@@ -1102,7 +1102,8 @@ export const getTeamTrainingRequests = async (req, res, next) => {
       const c = e.course || {};
 
       let statusStr = 'Pending';
-      if (e.status === 'COMPLETED' || e.progressPct >= 100) statusStr = 'Completed';
+      if (e.progressPct === -1.0) statusStr = 'Rejected';
+      else if (e.status === 'COMPLETED' || e.progressPct >= 100) statusStr = 'Completed';
       else if (e.status === 'IN_PROGRESS') statusStr = 'Approved';
       else if (e.status === 'ENROLLED') statusStr = 'Pending';
       else if (e.status === 'NOT_STARTED') statusStr = 'Pending';
