@@ -314,13 +314,15 @@ export const getMyLearningRecommendations = async (req, res, next) => {
       });
     }
 
-    // Fetch user details for role alignment
+    // Fetch user details for role alignment and team approval target
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { jobTitle: true, department: { select: { name: true } } }
+      select: { teamId: true, jobTitle: true, department: { select: { name: true } } }
     });
     const userRole = (user?.jobTitle || '').toLowerCase();
     const userDept = (user?.department?.name || '').toLowerCase();
+    const hasTeam = Boolean(user?.teamId);
+    const approvalTarget = hasTeam ? 'Leader' : 'HR';
 
     const gapSkillNames = userGaps.map(g => (g.skill?.name || '').toLowerCase());
     const gapSkillMap = new Map(userGaps.map(g => [(g.skill?.name || '').toLowerCase(), g.severity]));
@@ -381,6 +383,10 @@ export const getMyLearningRecommendations = async (req, res, next) => {
         }
       }
 
+      const rawStatus = enrollment ? enrollment.status : 'NOT_ENROLLED';
+      const isPending = rawStatus === 'PENDING' || rawStatus === 'NOT_STARTED';
+      const isApproved = rawStatus === 'ENROLLED' || rawStatus === 'IN_PROGRESS' || (enrollment && enrollment.progressPct > 0);
+
       return {
         id: course.id,
         title: course.title,
@@ -392,7 +398,11 @@ export const getMyLearningRecommendations = async (req, res, next) => {
         externalUrl: course.externalUrl || 'https://www.youtube-nocookie.com/embed/c9Wg6Cb_YlU',
         isCompliance: course.isCompliance,
         skillsTaught: courseSkills,
-        enrollmentStatus: enrollment ? enrollment.status : 'NOT_STARTED',
+        enrollmentStatus: rawStatus,
+        isPending: isPending,
+        isApproved: isApproved,
+        hasTeam: hasTeam,
+        approvalTarget: approvalTarget,
         progressPct: enrollment ? enrollment.progressPct : 0,
         matchScore: matchScore,
         isGapMatch: isGapMatch,
@@ -431,6 +441,14 @@ export const enrollCourse = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'courseId is required.' });
     }
 
+    const userObj = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { teamId: true }
+    });
+
+    const hasTeam = Boolean(userObj?.teamId);
+    const approvalTarget = hasTeam ? 'Leader' : 'HR';
+
     const courseObj = await prisma.course.findUnique({
       where: { id: courseId }
     });
@@ -440,7 +458,7 @@ export const enrollCourse = async (req, res, next) => {
         userId_courseId: { userId, courseId }
       },
       update: {
-        status: 'ENROLLED',
+        status: 'PENDING',
         courseTitle: courseObj?.title || undefined
       },
       create: {
@@ -448,13 +466,23 @@ export const enrollCourse = async (req, res, next) => {
         userId,
         courseId,
         courseTitle: courseObj?.title || null,
-        status: 'ENROLLED',
+        status: 'PENDING',
         progressPct: 0.0
       },
       include: { course: true }
     });
 
-    res.json({ success: true, message: 'Training request submitted to Team Leader for approval.', data: enrollment });
+    const message = hasTeam 
+      ? 'Training request submitted to your Team Leader for approval.' 
+      : 'Training request submitted to HR Manager for approval.';
+
+    res.json({ 
+      success: true, 
+      message, 
+      hasTeam,
+      approvalTarget,
+      data: enrollment 
+    });
   } catch (error) {
     next(error);
   }
