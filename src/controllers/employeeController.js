@@ -827,58 +827,106 @@ export const getCareerPaths = async (req, res, next) => {
     const userSkills = user?.skills || [];
     const gaps = user?.skillGaps || [];
     const assessments = user?.assessments || [];
+    const enrollments = user?.enrollments || [];
 
-    // Infer user domain from actual UserSkill names in DB
-    const skillNames = userSkills.map(s => s.skill?.name || '').join(' ').toLowerCase();
-    const gapNames = gaps.map(g => g.skill?.name || '').join(' ').toLowerCase();
-    const allSkillText = `${skillNames} ${gapNames}`;
+    // Map courseId -> progressPct for instant lookup
+    const enrollmentMap = {};
+    enrollments.forEach(e => {
+      enrollmentMap[e.courseId] = e.progressPct || 0;
+    });
 
-    let inferredDomain = 'Engineering';
+    // Determine current user title & department
+    const userDept = user?.department?.name || 'Development';
     let inferredCurrentTitle = user?.jobTitle;
-
     if (!inferredCurrentTitle || inferredCurrentTitle === 'N/A' || inferredCurrentTitle === 'EMPLOYEE') {
-      if (allSkillText.includes('figma') || allSkillText.includes('canva') || allSkillText.includes('design') || allSkillText.includes('ux') || allSkillText.includes('ui')) {
-        inferredDomain = 'Product Design & UI/UX';
-        inferredCurrentTitle = 'Product Designer';
-      } else if (allSkillText.includes('react') || allSkillText.includes('frontend') || allSkillText.includes('angular') || allSkillText.includes('next')) {
-        inferredDomain = 'Frontend Engineering';
-        inferredCurrentTitle = 'Frontend Engineer';
-      } else if (allSkillText.includes('docker') || allSkillText.includes('kubernetes') || allSkillText.includes('devops') || allSkillText.includes('cloud') || allSkillText.includes('aws')) {
-        inferredDomain = 'Cloud & DevOps Engineering';
-        inferredCurrentTitle = 'DevOps Engineer';
+      inferredCurrentTitle = `${userDept} Specialist`;
+    }
+
+    // Dynamic Readiness Calculation based on actual course progress
+    let targetReadiness = 100;
+    if (gaps.length > 0) {
+      let totalEffectiveRatio = 0;
+      gaps.forEach(g => {
+        const reqLvl = g.requiredLevel || 4.5;
+        const currLvl = g.currentLevel || 1.0;
+        
+        // Find matching course progress percentage
+        let progressPct = 0;
+        if (g.assignedCourseId && enrollmentMap[g.assignedCourseId] !== undefined) {
+          progressPct = enrollmentMap[g.assignedCourseId];
+        } else if (g.assignedCourse?.id && enrollmentMap[g.assignedCourse.id] !== undefined) {
+          progressPct = enrollmentMap[g.assignedCourse.id];
+        }
+
+        // Effective level grows linearly with course progress %
+        const effectiveLevel = currLvl + ((reqLvl - currLvl) * (progressPct / 100));
+        const ratio = Math.min(1.0, effectiveLevel / reqLvl);
+        totalEffectiveRatio += ratio;
+      });
+
+      const avgRatio = totalEffectiveRatio / gaps.length;
+      // Realistic readiness: 25% baseline + up to 75% depending on course progress
+      targetReadiness = Math.min(100, Math.max(25, Math.round(avgRatio * 100)));
+    } else if (userSkills.length > 0) {
+      const sumProficiency = userSkills.reduce((acc, s) => acc + (s.proficiencyLevel || 1.0), 0);
+      const avgProficiency = sumProficiency / userSkills.length;
+      targetReadiness = Math.min(100, Math.max(40, Math.round((avgProficiency / 5.0) * 100)));
+    }
+
+    // Role Matrix based on Department
+    const deptLower = userDept.toLowerCase();
+    let primaryTargetTitle = `Lead ${userDept} Architect`;
+    let secondaryTargetTitle = `${userDept} Team Lead`;
+    let tertiaryTargetTitle = `Principal ${userDept} Specialist`;
+
+    if (deptLower.includes('development') || deptLower.includes('engineering') || deptLower.includes('software')) {
+      primaryTargetTitle = 'Lead Development Architect';
+      secondaryTargetTitle = 'Engineering Team Lead';
+      tertiaryTargetTitle = 'Principal Systems Engineer';
+    } else if (deptLower.includes('design') || deptLower.includes('ux') || deptLower.includes('ui')) {
+      primaryTargetTitle = 'Lead Design Systems Architect';
+      secondaryTargetTitle = 'Design Operations Manager';
+      tertiaryTargetTitle = 'Principal UX Strategist';
+    } else if (deptLower.includes('devops') || deptLower.includes('cloud')) {
+      primaryTargetTitle = 'Principal Cloud Architect';
+      secondaryTargetTitle = 'SRE Team Lead';
+      tertiaryTargetTitle = 'Enterprise Security Director';
+    }
+
+    // Find Acceleration Course from DB
+    let recommendedCourseTitle = 'Enterprise Skill Mastery Course';
+    let targetCertTitle = `Certified ${userDept} Specialist`;
+    let targetCourseId = null;
+
+    if (gaps.length > 0) {
+      const topGap = gaps[0];
+      if (topGap.assignedCourse) {
+        recommendedCourseTitle = topGap.assignedCourse.title;
+        targetCourseId = topGap.assignedCourse.id;
       } else {
-        inferredCurrentTitle = 'Software Engineer';
+        const matchCourseSkill = await prisma.courseSkill.findFirst({
+          where: { skillId: topGap.skillId },
+          include: { course: true }
+        });
+        if (matchCourseSkill?.course) {
+          recommendedCourseTitle = matchCourseSkill.course.title;
+          targetCourseId = matchCourseSkill.course.id;
+        } else {
+          recommendedCourseTitle = `${topGap.skill?.name || userDept} Mastery Course`;
+        }
+      }
+      targetCertTitle = `Certified ${topGap.skill?.name || userDept} Professional`;
+    } else {
+      const topCourse = await prisma.course.findFirst({ orderBy: { rating: 'desc' } });
+      if (topCourse) {
+        recommendedCourseTitle = topCourse.title;
+        targetCourseId = topCourse.id;
       }
     }
 
-    const userDept = user?.department?.name || inferredDomain;
-
-    // Calculate real readiness percentage based on UserSkills vs Gaps
     const totalGapsCount = gaps.length;
-    let targetReadiness = 75;
-    if (userSkills.length > 0) {
-      const sumProficiency = userSkills.reduce((acc, s) => acc + (s.proficiencyLevel || 1.0), 0);
-      const avgProficiency = sumProficiency / userSkills.length; // Out of 5.0
-      targetReadiness = Math.min(100, Math.max(30, Math.round((avgProficiency / 5.0) * 100)));
-    } else if (totalGapsCount > 0) {
-      targetReadiness = Math.max(40, Math.round(100 - (totalGapsCount * 15)));
-    }
 
-    // Dynamic Career Roadmap steps based on employee's actual domain
-    const isDesign = inferredDomain.includes('Design') || allSkillText.includes('figma') || allSkillText.includes('canva');
-    const isFrontend = inferredDomain.includes('Frontend') || allSkillText.includes('react');
-
-    const roadmap = [
-      { step: 1, label: inferredCurrentTitle, sub: 'CURRENT ROLE', status: 'active' },
-      { step: 2, label: isDesign ? 'Senior UI/UX Specialist' : isFrontend ? 'Senior Frontend Engineer' : `Senior ${inferredCurrentTitle}`, sub: 'NEXT STEP', status: 'active', flag: true },
-      { step: 3, label: isDesign ? 'Lead Design Systems Architect' : isFrontend ? 'Lead Frontend Architect' : `Lead ${userDept} Specialist`, sub: 'TARGET PATH', status: 'pending', star: true },
-      { step: 4, label: isDesign ? 'Head of Product Design' : isFrontend ? 'Director of Frontend' : `Principal ${userDept} Director`, sub: 'ADVANCED', status: 'locked' }
-    ];
-
-    // Dynamic Recommended Target Paths
-    const primaryTargetTitle = isDesign ? 'Lead Design Systems Architect' : isFrontend ? 'Lead Frontend Architect' : `Lead ${userDept} Specialist`;
-    const secondaryTargetTitle = isDesign ? 'Design Operations Manager' : isFrontend ? 'Engineering Team Lead' : `${userDept} Technical Manager`;
-
+    // 3 Recommended Target Paths
     const recommendedPaths = [
       {
         id: 'path-1',
@@ -888,64 +936,80 @@ export const getCareerPaths = async (req, res, next) => {
         gapsText: `${totalGapsCount} Active Skill ${totalGapsCount === 1 ? 'Gap' : 'Gaps'}`,
         timeToReady: totalGapsCount === 0 ? 'Ready Now' : `~ ${Math.max(1, Math.round(totalGapsCount * 1.5))} Months`,
         readiness: `${targetReadiness}%`,
-        subText: targetReadiness >= 75 ? 'HIGH READINESS MATCH' : 'MODERATE READINESS MATCH',
-        isPrimary: true
+        readinessVal: targetReadiness,
+        subText: targetReadiness >= 75 ? 'HIGH READINESS MATCH' : 'ACTIVE LEARNING TRACK',
+        isPrimary: true,
+        aiRationale: `Calculated from your verified ${userDept} skill profile. Resolving active gaps will raise readiness to 100%.`,
+        targetCourseId,
+        targetCourseTitle: recommendedCourseTitle,
+        targetCertTitle,
+        roadmap: [
+          { step: 1, label: inferredCurrentTitle, sub: 'CURRENT ROLE', status: 'active' },
+          { step: 2, label: `Senior ${inferredCurrentTitle}`, sub: 'NEXT STEP', status: 'active', flag: true },
+          { step: 3, label: primaryTargetTitle, sub: 'TARGET PATH', status: 'pending', star: true },
+          { step: 4, label: `Director of ${userDept}`, sub: 'ADVANCED', status: 'locked' }
+        ]
       },
       {
         id: 'path-2',
         title: secondaryTargetTitle,
-        dept: 'Engineering & Operations',
+        dept: `${userDept} & Operations`,
+        gapsCount: totalGapsCount + 1,
+        gapsText: `${totalGapsCount + 1} Active Skill Gaps`,
+        timeToReady: `~ ${Math.max(2, Math.round((totalGapsCount + 1) * 1.5))} Months`,
+        readiness: `${Math.max(20, targetReadiness - 15)}%`,
+        readinessVal: Math.max(20, targetReadiness - 15),
+        subText: 'LEADERSHIP TRACK',
+        isPrimary: false,
+        aiRationale: `Leadership track combining technical expertise with team management benchmarks.`,
+        targetCourseId,
+        targetCourseTitle: 'Engineering Leadership & Team Management',
+        targetCertTitle: `Certified ${userDept} Team Lead`,
+        roadmap: [
+          { step: 1, label: inferredCurrentTitle, sub: 'CURRENT ROLE', status: 'active' },
+          { step: 2, label: `Team Lead Specialist`, sub: 'NEXT STEP', status: 'active', flag: true },
+          { step: 3, label: secondaryTargetTitle, sub: 'TARGET PATH', status: 'pending', star: true },
+          { step: 4, label: `VP of ${userDept}`, sub: 'ADVANCED', status: 'locked' }
+        ]
+      },
+      {
+        id: 'path-3',
+        title: tertiaryTargetTitle,
+        dept: `Specialized R&D`,
         gapsCount: totalGapsCount + 2,
         gapsText: `${totalGapsCount + 2} Active Skill Gaps`,
         timeToReady: `~ ${Math.max(3, Math.round((totalGapsCount + 2) * 1.5))} Months`,
-        readiness: `${Math.max(35, targetReadiness - 15)}%`,
-        subText: 'REQUIRES LEADERSHIP TRACK',
-        isPrimary: false
+        readiness: `${Math.max(15, targetReadiness - 25)}%`,
+        readinessVal: Math.max(15, targetReadiness - 25),
+        subText: 'SPECIALIST TRACK',
+        isPrimary: false,
+        aiRationale: `Advanced domain specialization path for deep technical mastery.`,
+        targetCourseId,
+        targetCourseTitle: `${userDept} Architecture & Systems Design`,
+        targetCertTitle: `Principal ${userDept} Specialist`,
+        roadmap: [
+          { step: 1, label: inferredCurrentTitle, sub: 'CURRENT ROLE', status: 'active' },
+          { step: 2, label: `Senior Systems Specialist`, sub: 'NEXT STEP', status: 'active', flag: true },
+          { step: 3, label: tertiaryTargetTitle, sub: 'TARGET PATH', status: 'pending', star: true },
+          { step: 4, label: `Chief Systems Fellow`, sub: 'ADVANCED', status: 'locked' }
+        ]
       }
     ];
 
-    // Build Monthly Readiness Chart from actual DB SkillAssessment scores!
+    // Monthly Readiness Chart
     const monthsList = ['Jan', 'Feb', 'Mar', 'Apr', 'NOW', 'Jun', 'Jul', 'Aug'];
     const monthlyProgress = monthsList.map((month, idx) => {
       if (month === 'NOW') {
         return { month, heightPct: `${targetReadiness}%`, active: true, forecast: false };
       } else if (idx < 4) {
-        // Find if user took an assessment around that historical index
         const matchAsm = assessments[idx];
-        const scoreVal = matchAsm ? Math.round(matchAsm.score) : Math.max(35, targetReadiness - ((4 - idx) * 8));
+        const scoreVal = matchAsm ? Math.round(matchAsm.score) : Math.max(20, targetReadiness - ((4 - idx) * 5));
         return { month, heightPct: `${scoreVal}%`, active: false, forecast: false };
       } else {
-        const forecastVal = Math.min(100, targetReadiness + ((idx - 4) * 6));
+        const forecastVal = Math.min(100, targetReadiness + ((idx - 4) * 10));
         return { month, heightPct: `${forecastVal}%`, active: false, forecast: true };
       }
     });
-
-    // Real Acceleration Plan from DB (Find top gap and matching course)
-    let recommendedCourseTitle = 'Enterprise Skill Mastery Course';
-    let targetCertTitle = 'SkillPulse Professional Certification';
-
-    if (gaps.length > 0) {
-      const topGap = gaps[0];
-      if (topGap.assignedCourse) {
-        recommendedCourseTitle = topGap.assignedCourse.title;
-      } else {
-        const matchCourseSkill = await prisma.courseSkill.findFirst({
-          where: { skillId: topGap.skillId },
-          include: { course: true }
-        });
-        if (matchCourseSkill?.course) {
-          recommendedCourseTitle = matchCourseSkill.course.title;
-        } else {
-          recommendedCourseTitle = `${topGap.skill?.name || 'Advanced Technical'} Mastery & Application`;
-        }
-      }
-      targetCertTitle = `Certified ${topGap.skill?.name || 'Technical'} Specialist`;
-    } else {
-      const anyCourse = await prisma.course.findFirst({ orderBy: { rating: 'desc' } });
-      if (anyCourse) {
-        recommendedCourseTitle = anyCourse.title;
-      }
-    }
 
     res.json({
       success: true,
@@ -958,14 +1022,22 @@ export const getCareerPaths = async (req, res, next) => {
         },
         primaryTargetRole: primaryTargetTitle,
         targetReadiness,
-        gaps,
-        roadmap,
+        gaps: gaps.map(g => ({
+          ...g,
+          progressPct: (g.assignedCourseId && enrollmentMap[g.assignedCourseId] !== undefined)
+            ? enrollmentMap[g.assignedCourseId]
+            : (g.assignedCourse?.id && enrollmentMap[g.assignedCourse.id] !== undefined)
+            ? enrollmentMap[g.assignedCourse.id]
+            : 0
+        })),
+        roadmap: recommendedPaths[0].roadmap,
         recommendedPaths,
         monthlyProgress,
         accelerationPlan: {
+          targetCourseId,
           recommendedCourse: recommendedCourseTitle,
           targetCertification: targetCertTitle,
-          estimatedIncrease: `+${totalGapsCount > 0 ? 15 : 5}% in 30 Days`
+          estimatedIncrease: `+${totalGapsCount > 0 ? 25 : 10}% upon Course Completion`
         }
       }
     });
