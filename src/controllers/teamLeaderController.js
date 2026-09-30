@@ -63,6 +63,7 @@ export const getTeamSkillOverview = async (req, res, next) => {
 
     // Extract distinct skills present across team members
     const skillMap = {};
+    const skillExpertCounts = {}; // Track how many members are expert/advanced in each skill
     const categorySet = new Set();
     let totalProficiencySum = 0;
     let totalSkillsCount = 0;
@@ -72,17 +73,25 @@ export const getTeamSkillOverview = async (req, res, next) => {
     members.forEach(m => {
       (m.skills || []).forEach(us => {
         if (us.skill) {
-          skillMap[us.skill.id] = us.skill.name;
+          const sName = us.skill.name;
+          skillMap[us.skill.id] = sName;
           if (us.skill.category?.name) categorySet.add(us.skill.category.name);
           totalProficiencySum += (us.proficiencyLevel || 1.0);
           totalSkillsCount += 1;
-          if (us.proficiencyLevel >= 4.0) advancedSkillsCount += 1;
+
+          if (us.proficiencyLevel >= 4.0) {
+            advancedSkillsCount += 1;
+            skillExpertCounts[sName] = (skillExpertCounts[sName] || 0) + 1;
+          }
         }
       });
       (m.skillGaps || []).forEach(g => {
         if (g.severity === 'CRITICAL') criticalGapsCount += 1;
       });
     });
+
+    // Identify Single Point of Failure (SPOF) skills (where exactly 1 team member is an expert)
+    const spofSkills = Object.keys(skillExpertCounts).filter(skillName => skillExpertCounts[skillName] === 1);
 
     let matrixSkills = Object.values(skillMap).slice(0, 7);
     if (matrixSkills.length === 0) {
@@ -98,12 +107,22 @@ export const getTeamSkillOverview = async (req, res, next) => {
       ? Math.round((advancedSkillsCount / totalSkillsCount) * 100)
       : 0;
 
+    // Squad Synergy Index: higher when skills are well distributed, penalized by SPOF risks & critical gaps
+    const synergyScore = Math.min(100, Math.max(45, Math.round(100 - (spofSkills.length * 7) - (criticalGapsCount * 4))));
+
     const categories = ['All Categories', ...Array.from(categorySet)];
 
     const leaderTeams = await prisma.team.findMany({
       where: { tenantId, leaderId },
       select: { id: true, name: true }
     });
+
+    let aiRecommendation = 'Squad capability is well-balanced across active projects.';
+    if (spofSkills.length > 0) {
+      aiRecommendation = `Single Point of Failure risk detected in ${spofSkills.slice(0, 2).join(', ')}. Cross-train team members to eliminate project bottleneck risks.`;
+    } else if (criticalGapsCount > 0) {
+      aiRecommendation = `Address ${criticalGapsCount} critical skill gaps to boost squad readiness above 85%.`;
+    }
 
     res.json({
       success: true,
@@ -116,7 +135,15 @@ export const getTeamSkillOverview = async (req, res, next) => {
           activeMembersCount: members.length,
           avgReadiness: `${avgReadiness}%`,
           advancedCoverage: `${advancedCoverage}%`,
-          criticalGapsCount
+          criticalGapsCount,
+          synergyScore: `${synergyScore}%`,
+          spofCount: spofSkills.length
+        },
+        aiInsights: {
+          synergyScore: `${synergyScore}%`,
+          spofSkills,
+          spofCount: spofSkills.length,
+          aiRecommendation
         }
       }
     });
