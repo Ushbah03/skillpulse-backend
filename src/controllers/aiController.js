@@ -73,26 +73,39 @@ export const matchSquadForProject = async (req, res, next) => {
       });
     });
 
+    const skillDeficiencySet = new Set(requiredSkills.map(s => typeof s === 'string' ? s.trim() : (s?.name || '').trim()));
+
     const scoredCandidates = availableEmployees.map(emp => {
       let matchedWeight = 0;
       let totalWeight = 0;
+      const matchedSkills = [];
+      const missingSkills = [];
 
       requiredSkills.forEach(reqSkill => {
-        const reqSkillName = typeof reqSkill === 'string' ? reqSkill : (reqSkill?.name || '');
+        const reqSkillName = typeof reqSkill === 'string' ? reqSkill.trim() : (reqSkill?.name || '').trim();
         const minLevel = typeof reqSkill === 'object' && reqSkill?.minLevel ? reqSkill.minLevel : 3.0;
         const weight = typeof reqSkill === 'object' && reqSkill?.weight ? reqSkill.weight : 1.0;
         
         totalWeight += weight;
         if (reqSkillName) {
-          const userSkill = emp.skills.find(s => s.skill?.name?.toLowerCase().includes(reqSkillName.toLowerCase()) || reqSkillName.toLowerCase().includes(s.skill?.name?.toLowerCase()));
-          if (userSkill) {
-            const ratio = Math.min(1.0, (userSkill.proficiencyLevel || 1.0) / minLevel);
+          const userSkill = emp.skills.find(s => 
+            s.skill?.name?.toLowerCase().includes(reqSkillName.toLowerCase()) || 
+            reqSkillName.toLowerCase().includes(s.skill?.name?.toLowerCase())
+          );
+
+          if (userSkill && userSkill.proficiencyLevel > 0) {
+            const ratio = Math.min(1.0, userSkill.proficiencyLevel / minLevel);
             matchedWeight += ratio * weight;
+            matchedSkills.push(`${userSkill.skill.name} (${userSkill.proficiencyLevel}/5)`);
+            skillDeficiencySet.delete(reqSkillName);
+          } else {
+            missingSkills.push(reqSkillName);
           }
         }
       });
 
-      const fitScore = totalWeight > 0 ? Math.round((matchedWeight / totalWeight) * 100) : 80;
+      // 100% REAL MATCH SCORE - STRICTLY DERIVED FROM REAL DB SKILLS
+      const fitScore = totalWeight > 0 ? Math.round((matchedWeight / totalWeight) * 100) : 0;
       const activeProjectsCount = activeProjectCountMap[emp.id] || 0;
       const capacityPct = activeProjectsCount >= 2 ? 100 : activeProjectsCount === 1 ? 50 : 0;
       const isFullCapacity = activeProjectsCount >= 2;
@@ -103,7 +116,9 @@ export const matchSquadForProject = async (req, res, next) => {
         email: emp.email,
         jobTitle: emp.jobTitle || emp.role,
         avatarUrl: emp.avatarUrl,
-        matchScore: Math.min(99, Math.max(70, fitScore)),
+        matchScore: fitScore, // 100% REAL MATCH SCORE (0% to 100%)
+        matchedSkills,
+        missingSkills,
         skillsRecorded: emp.skills.map(s => `${s.skill.name} (${s.proficiencyLevel})`),
         activeProjectsCount,
         capacityPct,
@@ -112,18 +127,29 @@ export const matchSquadForProject = async (req, res, next) => {
       };
     });
 
+    // Sort candidates by REAL matchScore descending
     scoredCandidates.sort((a, b) => b.matchScore - a.matchScore);
     const selectedSquad = scoredCandidates.slice(0, teamSize);
 
-    const overallSquadSynergy = Math.round(
-      selectedSquad.reduce((acc, c) => acc + c.matchScore, 0) / (selectedSquad.length || 1)
-    );
+    // Calculate REAL overall squad score from selected members
+    const overallSquadSynergy = selectedSquad.length > 0
+      ? Math.round(selectedSquad.reduce((acc, c) => acc + c.matchScore, 0) / selectedSquad.length)
+      : 0;
+
+    // Check if any required skills are missing across ALL team members in database
+    const missingInTeam = Array.from(skillDeficiencySet);
+    const hasDeficiency = missingInTeam.length > 0;
 
     res.json({
       success: true,
       overallSquadScore: overallSquadSynergy,
-      skillCoveragePct: 96.5,
-      recommendedSquad: selectedSquad
+      skillCoveragePct: requiredSkills.length > 0 ? Math.round(((requiredSkills.length - missingInTeam.length) / requiredSkills.length) * 100) : 100,
+      recommendedSquad: selectedSquad,
+      hasDeficiency,
+      missingInTeam,
+      aiHiringRecommendation: hasDeficiency 
+        ? `Skill Gap Alert: None of your team members possess verified proficiency in [${missingInTeam.join(', ')}]. AI recommends assigning targeted LMS training courses or initiating a new hire requisition.`
+        : 'Squad capability covers 100% of target project requirements.'
     });
   } catch (error) {
     next(error);
