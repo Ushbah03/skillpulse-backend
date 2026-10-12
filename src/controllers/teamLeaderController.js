@@ -806,9 +806,7 @@ export const getMemberProfileDetail = async (req, res, next) => {
         enrollments: {
           include: { course: true }
         },
-        assessments: {
-          include: { assessment: true }
-        }
+        assessments: true
       }
     });
 
@@ -954,7 +952,7 @@ export const getMemberProfileDetail = async (req, res, next) => {
       if (sortedAssessments.length >= 2) {
         const assessIdx = Math.min(sortedAssessments.length - 1, Math.floor((i / 5) * sortedAssessments.length));
         score = Math.round(sortedAssessments[assessIdx].score || targetScore);
-        milestone = sortedAssessments[assessIdx].assessment?.title || 'Skill Assessment';
+        milestone = sortedAssessments[assessIdx].title || sortedAssessments[assessIdx].category || 'Skill Assessment';
       } else {
         // Human Learning Acquisition Model (Sigmoid curve with practical project application variance)
         const t = i;
