@@ -1014,6 +1014,12 @@ export const getMemberProfileDetail = async (req, res, next) => {
           skillsCount: distinctSkillsMap.size,
           radarPolygon,
           radarLabels,
+          radarSkills: radarSkills.map((s, idx) => ({
+            name: s.name,
+            level: Number(s.proficiencyLevel || 1.0).toFixed(1),
+            category: s.category || 'Competency',
+            point: radarPoints[idx]
+          })),
           aiInsights: {
             growthPath: growthPathText,
             growthConfidence: `${avgScorePct}%`,
