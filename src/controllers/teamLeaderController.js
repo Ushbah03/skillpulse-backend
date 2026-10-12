@@ -1147,7 +1147,89 @@ export const getAssignLearningData = async (req, res, next) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    // 5. Calculate live stats
+    // 5. Multi-Factor AI Gap Closure & Course Impact Recommender Engine
+    // Aggregate real skill gaps across all team members
+    const teamGaps = [];
+    members.forEach(m => {
+      (m.skillGaps || []).forEach(g => {
+        teamGaps.push({
+          userId: m.id,
+          userName: `${m.firstName} ${m.lastName}`.trim(),
+          skillId: g.skillId,
+          skillName: (g.skill?.name || '').trim(),
+          severity: (g.severity || 'MEDIUM').toUpperCase(),
+          currentLevel: Number(g.currentLevel) || 1.0,
+          targetLevel: Number(g.targetLevel) || 4.0
+        });
+      });
+    });
+
+    const scoredCourses = availableCourses.map(course => {
+      const courseTitleLower = (course.title || '').toLowerCase();
+      const courseDescLower = (course.description || '').toLowerCase();
+      const courseSkills = (course.skillsTaught || []).map(st => (st.skill?.name || '').toLowerCase());
+
+      let highestScore = 0;
+      let matchedGap = null;
+      const affectedUsers = new Set();
+      let highestSeverity = 'NONE';
+
+      teamGaps.forEach(gap => {
+        const gapNameLower = gap.skillName.toLowerCase();
+        // Semantic keyword and exact skill match
+        const isMatch = courseSkills.some(s => s.includes(gapNameLower) || gapNameLower.includes(s)) ||
+                        courseTitleLower.includes(gapNameLower) ||
+                        courseDescLower.includes(gapNameLower);
+
+        if (isMatch) {
+          affectedUsers.add(gap.userName);
+          const severityWeight = gap.severity === 'CRITICAL' ? 40 : gap.severity === 'HIGH' ? 30 : 15;
+          const deltaL = Math.max(0.5, gap.targetLevel - gap.currentLevel);
+          const score = 55 + severityWeight + Math.min(10, deltaL * 2.5);
+
+          if (score > highestScore) {
+            highestScore = score;
+            matchedGap = gap;
+            highestSeverity = gap.severity;
+          }
+        }
+      });
+
+      const impactScore = highestScore > 0 ? Math.min(99, Math.round(highestScore)) : 45;
+      const isAiRecommended = highestScore >= 70;
+      let impactTier = 'CATALOG';
+      let aiReason = 'Platform curriculum course';
+
+      if (isAiRecommended && matchedGap) {
+        if (highestSeverity === 'CRITICAL') {
+          impactTier = 'HIGH IMPACT';
+          aiReason = `Directly bridges CRITICAL skill gap in ${matchedGap.skillName} (Current: ${matchedGap.currentLevel}, Target: ${matchedGap.targetLevel}) for ${Array.from(affectedUsers).join(', ')}.`;
+        } else if (highestSeverity === 'HIGH') {
+          impactTier = 'HIGH IMPACT';
+          aiReason = `Targeted training to resolve HIGH severity gap in ${matchedGap.skillName} for ${Array.from(affectedUsers).join(', ')}.`;
+        } else {
+          impactTier = 'MED IMPACT';
+          aiReason = `Curated module to bridge ${matchedGap.skillName} gap for ${Array.from(affectedUsers).join(', ')}.`;
+        }
+      }
+
+      return {
+        ...course,
+        impactScore,
+        impactTier,
+        isAiRecommended,
+        aiReason,
+        matchedSkill: matchedGap ? matchedGap.skillName : null,
+        affectedUsers: Array.from(affectedUsers)
+      };
+    });
+
+    // Rank courses: Highest AI Impact courses first
+    scoredCourses.sort((a, b) => b.impactScore - a.impactScore);
+
+    const aiRecommendations = scoredCourses.filter(c => c.isAiRecommended);
+
+    // 6. Calculate live stats
     const totalAssigned = enrollments.length;
     const completedCount = enrollments.filter(e => e.status === 'COMPLETED' || e.progressPct >= 100).length;
     const inProgressCount = enrollments.filter(e => e.status === 'ENROLLED' && e.progressPct < 100).length;
@@ -1157,7 +1239,8 @@ export const getAssignLearningData = async (req, res, next) => {
       success: true,
       data: {
         members,
-        availableCourses,
+        availableCourses: scoredCourses,
+        aiRecommendations,
         enrollments,
         stats: {
           availableProgramsCount: availableCourses.length,
