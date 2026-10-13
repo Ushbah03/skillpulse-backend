@@ -1175,11 +1175,21 @@ export const getAssignLearningData = async (req, res, next) => {
       let highestSeverity = 'NONE';
 
       teamGaps.forEach(gap => {
-        const gapNameLower = gap.skillName.toLowerCase();
-        // Semantic keyword and exact skill match
-        const isMatch = courseSkills.some(s => s.includes(gapNameLower) || gapNameLower.includes(s)) ||
-                        courseTitleLower.includes(gapNameLower) ||
-                        courseDescLower.includes(gapNameLower);
+        const gapClean = gap.skillName.replace(/\s+/g, ' ').trim().toLowerCase();
+        
+        // High-Precision Match: Direct Taught Skill OR Direct Course Title Focus
+        const directSkillMatch = courseSkills.some(s => {
+          const sClean = s.replace(/\s+/g, ' ').trim();
+          return sClean === gapClean || sClean.includes(gapClean) || gapClean.includes(sClean);
+        });
+
+        const titleMatch = courseTitleLower.includes(gapClean) || 
+          (gapClean.includes('react') && courseTitleLower.includes('react')) ||
+          (gapClean.includes('figma') && courseTitleLower.includes('figma')) ||
+          (gapClean.includes('canva') && courseTitleLower.includes('canva')) ||
+          (gapClean.includes('problem solving') && courseTitleLower.includes('problem solving'));
+
+        const isMatch = directSkillMatch || titleMatch;
 
         if (isMatch) {
           affectedUsers.add(gap.userName);
@@ -1189,7 +1199,7 @@ export const getAssignLearningData = async (req, res, next) => {
 
           if (score > highestScore) {
             highestScore = score;
-            matchedGap = gap;
+            matchedGap = { ...gap, skillName: gap.skillName.replace(/\s+/g, ' ').trim() };
             highestSeverity = gap.severity;
           }
         }
