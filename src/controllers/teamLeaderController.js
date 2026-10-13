@@ -1104,12 +1104,18 @@ export const getAssignLearningData = async (req, res, next) => {
       }
     });
 
-    // 3. Fetch all available courses in system
+    // 3. Fetch all existing available courses in system
     let availableCourses = await prisma.course.findMany({
+      where: {
+        OR: [
+          { tenantId },
+          { tenantId: null }
+        ]
+      },
       include: {
         skillsTaught: { include: { skill: true } }
       },
-      take: 20
+      take: 100
     });
 
     // If no courses exist, auto-create courses for active skills
