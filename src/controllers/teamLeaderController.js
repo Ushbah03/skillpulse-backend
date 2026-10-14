@@ -1181,6 +1181,14 @@ export const getAssignLearningData = async (req, res, next) => {
       let highestSeverity = 'NONE';
 
       teamGaps.forEach(gap => {
+        // Skip user if they are ALREADY actively enrolled in this course
+        const isUserAlreadyEnrolled = enrollments.some(en => 
+          en.courseId === course.id && 
+          en.userId === gap.userId &&
+          en.status !== 'CANCELLED' && en.status !== 'DROPPED'
+        );
+        if (isUserAlreadyEnrolled) return;
+
         const gapClean = gap.skillName.replace(/\s+/g, ' ').trim().toLowerCase();
         
         // High-Precision Match: Direct Taught Skill OR Direct Course Title Focus
@@ -1212,7 +1220,7 @@ export const getAssignLearningData = async (req, res, next) => {
       });
 
       const impactScore = highestScore > 0 ? Math.min(99, Math.round(highestScore)) : 45;
-      const isAiRecommended = highestScore >= 70;
+      const isAiRecommended = highestScore >= 70 && affectedUsers.size > 0;
       let impactTier = 'CATALOG';
       let aiReason = 'Platform curriculum course';
 
