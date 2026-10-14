@@ -1461,8 +1461,16 @@ export const getTeamPerformanceData = async (req, res, next) => {
     const completedEnrollmentsCount = members.reduce((acc, m) => acc + (m.enrollments?.filter(e => e.status === 'COMPLETED' || e.progressPct >= 100).length || 0), 0);
     const completionRatio = totalEnrollmentsCount > 0 ? completedEnrollmentsCount / totalEnrollmentsCount : 0.5;
 
-    const velocityIncreasePct = Math.min(25, Math.max(6, Math.round(8 + completionRatio * 10 + (overallTeamScorePct / 100) * 4)));
+    const velocityIncreasePct = Math.min(25, Math.max(5, Math.round(5 + completionRatio * 12 + (overallTeamScorePct / 100) * 3)));
     const confidenceScorePct = Math.min(96, Math.max(80, Math.round(78 + members.length * 4 + completedEnrollmentsCount * 2)));
+
+    // Dynamic and logically sound reason wording
+    let velocityReason = '';
+    if (completedEnrollmentsCount > 0) {
+      velocityReason = `Predicting a ${velocityIncreasePct}% increase in sprint velocity driven by ${completedEnrollmentsCount} completed training module${completedEnrollmentsCount > 1 ? 's' : ''} and verified skill capability gains.`;
+    } else {
+      velocityReason = `Projecting a potential ${velocityIncreasePct}% velocity uplift once active skill gaps are addressed and enrolled training modules are completed.`;
+    }
 
     let prescriptiveRecommendation = '';
     if (atRiskMembers.length > 0 && atRiskMembers[0].matchedCourse) {
@@ -1516,7 +1524,7 @@ export const getTeamPerformanceData = async (req, res, next) => {
         aiIntelligence: {
           velocityIncrease: `${velocityIncreasePct}%`,
           confidenceScore: `${confidenceScorePct}%`,
-          velocityReason: `Predicting a ${velocityIncreasePct}% increase in sprint velocity based on ${completedEnrollmentsCount} completed training modules and verified skill capability development.`,
+          velocityReason,
           prescriptiveRecommendation
         },
         availableCourses: availableCourses.map(c => ({
