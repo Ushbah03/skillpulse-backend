@@ -2049,7 +2049,7 @@ export const getTeamReports = async (req, res, next) => {
       totalGapsCount += userGaps.length;
 
       // Calculate individual skill score
-      let memberScore = 65;
+      let memberScore = 0;
       if (userSkills.length > 0) {
         const avgProf = userSkills.reduce((sum, s) => sum + (s.proficiencyLevel || 1.0), 0) / userSkills.length;
         memberScore = Math.round((avgProf / 5.0) * 100);
@@ -2080,7 +2080,7 @@ export const getTeamReports = async (req, res, next) => {
 
       const completionPct = enrollments.length > 0 
         ? Math.round((compCount / enrollments.length) * 100) 
-        : (userSkills.length > 0 ? 85 : 50);
+        : 0;
 
       // Readiness determination
       const criticalCount = userGaps.filter(g => g.severity === 'CRITICAL' || g.severity === 'HIGH').length;
@@ -2091,8 +2091,8 @@ export const getTeamReports = async (req, res, next) => {
       const initials = `${m.firstName?.[0] || ''}${m.lastName?.[0] || ''}`.toUpperCase() || 'EM';
       const fullName = `${m.firstName || ''} ${m.lastName || ''}`.trim() || 'Team Member';
 
-      // Performance index: 3.5 to 5.0 scale
-      const perfScore = (3.5 + (memberScore / 100) * 1.4).toFixed(1);
+      // Performance index: 1.0 to 5.0 scale strictly based on real score
+      const perfScore = (memberScore > 0 ? (1.0 + (memberScore / 100) * 4.0) : 0.0).toFixed(1);
 
       return {
         id: m.id,
@@ -2113,18 +2113,18 @@ export const getTeamReports = async (req, res, next) => {
     });
 
     const memberCount = members.length || 1;
-    const overallScore = Math.round(totalScoreSum / memberCount);
-    const overallPerformance = (3.5 + (overallScore / 100) * 1.4).toFixed(1);
+    const overallScore = members.length > 0 ? Math.round(totalScoreSum / memberCount) : 0;
+    const overallPerformance = members.length > 0 && overallScore > 0 ? (1.0 + (overallScore / 100) * 4.0).toFixed(1) : '0.0';
     const skillMaturity = (overallScore / 20).toFixed(1);
     const trainingCompletionPct = totalEnrollments > 0 
       ? Math.round((completedEnrollments / totalEnrollments) * 100)
-      : Math.min(100, Math.round(overallScore * 0.95));
+      : 0;
 
     // 4. Proficiency distribution
     const safeTotalSkills = Math.max(1, totalSkillsCount);
-    const advancedPct = Math.round((advancedCount / safeTotalSkills) * 100);
-    const intermediatePct = Math.round((intermediateCount / safeTotalSkills) * 100);
-    const beginnerPct = Math.max(0, 100 - advancedPct - intermediatePct);
+    const advancedPct = totalSkillsCount > 0 ? Math.round((advancedCount / safeTotalSkills) * 100) : 0;
+    const intermediatePct = totalSkillsCount > 0 ? Math.round((intermediateCount / safeTotalSkills) * 100) : 0;
+    const beginnerPct = totalSkillsCount > 0 ? Math.max(0, 100 - advancedPct - intermediatePct) : 0;
 
     // 5. Category distribution
     const colorPalette = ['bg-blue-600', 'bg-indigo-500', 'bg-cyan-500', 'bg-emerald-500', 'bg-amber-500'];
@@ -2139,12 +2139,6 @@ export const getTeamReports = async (req, res, next) => {
       };
     });
 
-    if (categoriesDistribution.length === 0) {
-      categoriesDistribution.push(
-        { name: 'TECHNICAL ENGINEERING', score: `${overallScore}% PROFICIENCY`, percentage: overallScore, color: 'bg-blue-600' }
-      );
-    }
-
     // 6. Longitudinal 6-Month Trend Data
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const now = new Date();
@@ -2157,9 +2151,9 @@ export const getTeamReports = async (req, res, next) => {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       trendMonths.push(monthNames[d.getMonth()]);
       const ramp = (5 - i) / 5;
-      trendPerformance.push(Math.max(40, Math.round(overallScore - (1 - ramp) * 15)));
-      trendSkillGrowth.push(Math.max(35, Math.round(overallScore - (1 - ramp) * 22)));
-      trendTrainingImpact.push(Math.max(30, Math.round(trainingCompletionPct - (1 - ramp) * 25)));
+      trendPerformance.push(Math.round(overallScore * (0.8 + ramp * 0.2)));
+      trendSkillGrowth.push(Math.round(overallScore * (0.7 + ramp * 0.3)));
+      trendTrainingImpact.push(Math.round(trainingCompletionPct * (0.6 + ramp * 0.4)));
     }
 
     // 7. Training Effectiveness Analysis (Before vs After Interventions)
@@ -2171,8 +2165,8 @@ export const getTeamReports = async (req, res, next) => {
       if (!gapSkillAgg[sName]) {
         gapSkillAgg[sName] = { currentLevels: [], requiredLevels: [] };
       }
-      gapSkillAgg[sName].currentLevels.push(g.currentLevel || 2.0);
-      gapSkillAgg[sName].requiredLevels.push(g.requiredLevel || 4.0);
+      gapSkillAgg[sName].currentLevels.push(g.currentLevel || 1.0);
+      gapSkillAgg[sName].requiredLevels.push(g.requiredLevel || 3.0);
     });
 
     let effectivenessBars = Object.keys(gapSkillAgg).slice(0, 4).map(sName => {
@@ -2185,20 +2179,20 @@ export const getTeamReports = async (req, res, next) => {
       };
     });
 
-    if (effectivenessBars.length === 0) {
+    if (effectivenessBars.length === 0 && categoriesDistribution.length > 0) {
       effectivenessBars = categoriesDistribution.slice(0, 4).map(c => ({
         label: c.name.length > 12 ? `${c.name.slice(0, 10)}...` : c.name,
-        valBefore: Math.max(30, c.percentage - 25),
+        valBefore: Math.round(c.percentage * 0.75),
         valAfter: c.percentage
       }));
     }
 
     const avgBefore = effectivenessBars.length > 0 
       ? Math.round(effectivenessBars.reduce((sum, b) => sum + b.valBefore, 0) / effectivenessBars.length)
-      : 50;
+      : 0;
     const avgAfter = effectivenessBars.length > 0
       ? Math.round(effectivenessBars.reduce((sum, b) => sum + b.valAfter, 0) / effectivenessBars.length)
-      : 80;
+      : 0;
     const skillImprovement = Math.max(0, avgAfter - avgBefore);
 
     // 8. AI Intelligence Insights (Dynamic from live DB)
@@ -2209,7 +2203,7 @@ export const getTeamReports = async (req, res, next) => {
 
     const allEnrollments = members.flatMap(m => m.enrollments || []);
     const inProgressEnrollment = allEnrollments.find(e => e.status === 'IN_PROGRESS' || e.status === 'ENROLLED');
-    const topCategory = categoriesDistribution[0] || { name: 'Engineering', percentage: 85 };
+    const topCategory = categoriesDistribution[0] || { name: 'Technical Engineering', percentage: overallScore };
 
     const aiInsights = [
       {
@@ -2217,17 +2211,17 @@ export const getTeamReports = async (req, res, next) => {
         badgeColor: "bg-blue-50 text-blue-600 border-blue-100",
         confidence: "94%",
         desc: inProgressEnrollment
-          ? `Team performance is projected to increase by +${Math.round(skillImprovement * 0.6 || 12)}% once the active "${inProgressEnrollment.course?.title || inProgressEnrollment.courseTitle || 'Targeted Skill'}" certification is completed by enrolled members.`
-          : `Team performance is projected to increase by +${Math.round(skillImprovement * 0.6 || 12)}% through structured milestone completion in ${topCategory.name}.`,
+          ? `Team performance is projected to increase by +${Math.round(skillImprovement * 0.6 || 8)}% once the active "${inProgressEnrollment.course?.title || inProgressEnrollment.courseTitle || 'Targeted Skill'}" certification is completed by enrolled members.`
+          : `Team performance trajectory is aligned with structured competency completion in ${topCategory.name}.`,
         title: inProgressEnrollment?.course?.title || `${topCategory.name} Track Optimization`,
         recommendation: `Accelerate completion of ${inProgressEnrollment?.course?.title || topCategory.name} to unlock immediate technical velocity and team milestone throughput.`,
-        impact: `+${Math.round(skillImprovement * 0.6 || 12)}% Velocity Lift`
+        impact: `+${Math.round(skillImprovement * 0.6 || 8)}% Velocity Lift`
       },
       {
         badge: "SUCCESS",
         badgeColor: "bg-emerald-50 text-emerald-600 border-emerald-100",
         confidence: "91%",
-        desc: `The "${topCategory.name}" competency domain has achieved ${topCategory.percentage || 85}% average proficiency, establishing baseline stability across production deliverables.`,
+        desc: `The "${topCategory.name}" competency domain has achieved ${topCategory.percentage}% average proficiency, establishing baseline stability across production deliverables.`,
         title: `${topCategory.name} Competency Validation`,
         recommendation: `Standardize best practices established in ${topCategory.name} across adjacent engineering squads to preserve team cross-functional agility.`,
         impact: "High ROI Confirmed"
@@ -2249,21 +2243,23 @@ export const getTeamReports = async (req, res, next) => {
 
     // 9. Executive Visual Summary Dark Module
     const readyCount = workforceMembers.filter(m => m.readiness === 'High').length;
-    const readinessPct = Math.round((readyCount / memberCount) * 100);
+    const readinessPct = members.length > 0 ? Math.round((readyCount / memberCount) * 100) : 0;
     const gapsWithCoursesCount = allGaps.filter(g => g.assignedCourseId).length;
-    const optimizationPct = allGaps.length > 0 ? Math.round((gapsWithCoursesCount / allGaps.length) * 100) : 90;
+    const optimizationPct = allGaps.length > 0 ? Math.round((gapsWithCoursesCount / allGaps.length) * 100) : 100;
     
     const resilientSkillsCount = Object.values(skillMembersCount).filter(cnt => cnt >= 2).length;
     const totalDistinctSkills = Math.max(1, Object.keys(skillMembersCount).length);
-    const resiliencePct = Math.min(100, Math.round((resilientSkillsCount / totalDistinctSkills) * 100));
+    const resiliencePct = totalSkillsCount > 0 ? Math.min(100, Math.round((resilientSkillsCount / totalDistinctSkills) * 100)) : 0;
+
+    const lastMonthGrowth = trendSkillGrowth.length >= 2 ? (trendSkillGrowth[trendSkillGrowth.length - 1] - trendSkillGrowth[trendSkillGrowth.length - 2]) : 0;
 
     const executiveSummary = {
       skillIndex: overallScore,
-      growthVelocity: allEnrollments.length > 0 ? 'High' : 'Optimal',
-      trendDelta: '+4.8',
-      readiness: Math.max(70, readinessPct),
-      optimization: Math.max(65, optimizationPct),
-      resilience: Math.max(60, resiliencePct)
+      growthVelocity: allEnrollments.length > 0 ? 'High' : (overallScore >= 70 ? 'Optimal' : 'Developing'),
+      trendDelta: lastMonthGrowth > 0 ? `+${lastMonthGrowth.toFixed(1)}` : (lastMonthGrowth < 0 ? `${lastMonthGrowth.toFixed(1)}` : '0.0'),
+      readiness: readinessPct,
+      optimization: optimizationPct,
+      resilience: resiliencePct
     };
 
     res.json({
