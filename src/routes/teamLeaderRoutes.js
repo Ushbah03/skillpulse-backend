@@ -10,7 +10,8 @@ import {
   getTeamPerformanceData,
   getTeamTrainingRequests,
   updateTrainingRequestStatus,
-  batchApproveTrainingRequests
+  batchApproveTrainingRequests,
+  getTeamReports
 } from '../controllers/teamLeaderController.js';
 import { authenticateJWT } from '../middleware/authMiddleware.js';
 import { requireRole } from '../middleware/rbacMiddleware.js';
@@ -28,7 +29,7 @@ router.get('/members/:id', getMemberProfileDetail);
 router.get('/assign-learning-data', getAssignLearningData);
 router.get('/performance', getTeamPerformanceData);
 router.get('/skill-matrix', getTeamSkillOverview);
-router.get('/reports', getTeamReadinessScore);
+router.get('/reports', getTeamReports);
 router.get('/training-requests', getTeamTrainingRequests);
 router.patch('/training-requests/:id/status', updateTrainingRequestStatus);
 router.post('/training-requests/batch-approve', batchApproveTrainingRequests);
