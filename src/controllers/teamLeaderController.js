@@ -57,6 +57,9 @@ export const getTeamSkillOverview = async (req, res, next) => {
         },
         skillGaps: {
           include: { skill: true }
+        },
+        enrollments: {
+          include: { course: true }
         }
       }
     });
