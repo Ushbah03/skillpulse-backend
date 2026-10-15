@@ -2023,7 +2023,7 @@ export const getTeamReports = async (req, res, next) => {
         department: true,
         skills: { include: { skill: { include: { category: true } } } },
         skillGaps: { include: { skill: { include: { category: true } }, assignedCourse: true } },
-        learningEnrollments: { include: { course: true } }
+        enrollments: { include: { course: true } }
       }
     });
 
@@ -2043,7 +2043,7 @@ export const getTeamReports = async (req, res, next) => {
     const workforceMembers = members.map(m => {
       const userSkills = m.skills || [];
       const userGaps = m.skillGaps || [];
-      const enrollments = m.learningEnrollments || [];
+      const enrollments = m.enrollments || [];
 
       totalSkillsCount += userSkills.length;
       totalGapsCount += userGaps.length;
@@ -2207,7 +2207,7 @@ export const getTeamReports = async (req, res, next) => {
       ? members.filter(m => (m.skillGaps || []).some(g => g.skillId === criticalGap.skillId)).map(m => `${m.firstName} ${m.lastName?.[0] || ''}.`)
       : [];
 
-    const allEnrollments = members.flatMap(m => m.learningEnrollments || []);
+    const allEnrollments = members.flatMap(m => m.enrollments || []);
     const inProgressEnrollment = allEnrollments.find(e => e.status === 'IN_PROGRESS' || e.status === 'ENROLLED');
     const topCategory = categoriesDistribution[0] || { name: 'Engineering', percentage: 85 };
 
