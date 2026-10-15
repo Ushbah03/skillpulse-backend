@@ -1763,7 +1763,7 @@ export const getTeamTrainingRequests = async (req, res, next) => {
 
     const demandMap = {};
     let totalDemandCount = 0;
-    let totalPendingCost = 0;
+    let totalPendingHours = 0;
 
     const formattedRequests = enrollments.map(e => {
       const u = e.user || {};
@@ -1808,11 +1808,11 @@ export const getTeamTrainingRequests = async (req, res, next) => {
         justification = `Foundational self-paced skill enrichment module.`;
       }
 
-      const costNumber = c.durationHours ? Math.round(c.durationHours * 95) : 1200;
-      const costVal = `$${costNumber.toLocaleString()}`;
+      const durationHours = c.durationHours ? Math.round(c.durationHours) : 10;
+      const durationVal = `${durationHours} Hours`;
 
       if (statusStr === 'Pending') {
-        totalPendingCost += costNumber;
+        totalPendingHours += durationHours;
       }
 
       // Group demand dynamically by real skill or category from DB
@@ -1831,8 +1831,8 @@ export const getTeamTrainingRequests = async (req, res, next) => {
         name: fullName,
         role: `${u.jobTitle || 'Engineer'} • ${c.provider || 'SkillPulse Academy'}`,
         course: c.title || 'Professional Skill Mastery',
-        cost: costVal,
-        costNum: costNumber,
+        duration: durationVal,
+        durationHours: durationHours,
         provider: c.provider || 'SkillPulse Academy',
         priority,
         status: statusStr,
@@ -1853,10 +1853,14 @@ export const getTeamTrainingRequests = async (req, res, next) => {
     const pendingRequestsCount = formattedRequests.filter(r => r.status === 'Pending').length;
 
     const aiInsights = {
-      budgetTitle: "Budget & License Optimization",
+      capacityTitle: "Team Learning Capacity & Pacing",
+      capacityText: pendingRequestsCount > 0
+        ? `Approving pending requests in batch commits approximately ${totalPendingHours} aggregate learning hours across team schedules, optimizing completion velocity before upcoming milestone deliverables.`
+        : "Current team learning commitments are evenly balanced across scheduled sprints and milestone targets.",
+      budgetTitle: "Team Learning Capacity & Pacing",
       budgetText: pendingRequestsCount > 0
-        ? `Approving corporate training requests in batch optimizes tenant licensing costs, unlocking ~15% volume savings across estimated $${totalPendingCost.toLocaleString()} L&D investment.`
-        : "All corporate training licenses are currently stabilized within approved departmental thresholds.",
+        ? `Approving pending requests in batch commits approximately ${totalPendingHours} aggregate learning hours across team schedules, optimizing completion velocity before upcoming milestone deliverables.`
+        : "Current team learning commitments are evenly balanced across scheduled sprints and milestone targets.",
       impactTitle: "Readiness Gap Impact",
       impactText: pendingHighPriorityCount > 0
         ? `${pendingHighPriorityCount} pending high-priority training request(s) directly close active critical capability gaps identified in team readiness scores.`
