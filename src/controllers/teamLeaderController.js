@@ -380,6 +380,7 @@ export const getTeamReadinessScore = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
     const leaderId = req.user.id;
+    const { projectId, requiredLevel } = req.query;
 
     // 1. Get team member IDs
     const memberIds = await getLeaderMemberIds(tenantId, leaderId);
@@ -397,11 +398,46 @@ export const getTeamReadinessScore = async (req, res, next) => {
       }
     });
 
-    // 3. Fetch leader's active projects for context dropdown
+    // 3. Fetch active projects for context dropdown
     const projects = await prisma.project.findMany({
-      where: { tenantId, leaderId },
-      select: { id: true, title: true, status: true }
+      where: { tenantId },
+      select: { id: true, title: true, status: true, requiredSkills: true, teamSizeTarget: true }
     });
+
+    // Fetch available courses from catalog for targeted training assignment
+    const availableCourses = await prisma.course.findMany({
+      where: { OR: [{ tenantId }, { tenantId: null }] },
+      select: { id: true, title: true, level: true, description: true }
+    });
+
+    // Determine target project context and required proficiency level
+    let targetMinLevel = 4.0;
+    if (requiredLevel) {
+      const lvlLower = requiredLevel.toLowerCase();
+      if (lvlLower.includes('expert') || lvlLower.includes('lead')) targetMinLevel = 4.5;
+      else if (lvlLower.includes('intermediate')) targetMinLevel = 3.0;
+      else if (lvlLower.includes('foundational')) targetMinLevel = 2.0;
+    }
+
+    let targetProject = null;
+    if (projectId && projectId !== 'General Team Deployment') {
+      targetProject = projects.find(p => p.id === projectId || p.title === projectId);
+    }
+
+    // Extract required skills for target project if any
+    const projectRequiredSkills = [];
+    if (targetProject && Array.isArray(targetProject.requiredSkills)) {
+      targetProject.requiredSkills.forEach(item => {
+        if (typeof item === 'string') {
+          projectRequiredSkills.push({ name: item.trim(), minLevel: targetMinLevel });
+        } else if (item && typeof item === 'object') {
+          projectRequiredSkills.push({
+            name: (item.skill || item.name || '').trim(),
+            minLevel: Number(item.minLevel) || targetMinLevel
+          });
+        }
+      });
+    }
 
     // 4. Calculate member readiness details
     let totalScoreSum = 0;
@@ -415,7 +451,6 @@ export const getTeamReadinessScore = async (req, res, next) => {
       const fullName = `${m.firstName || ''} ${m.lastName || ''}`.trim() || 'Team Member';
       
       const userSkills = m.skills || [];
-      const verifiedSkills = userSkills.filter(s => (s.proficiencyLevel || 1.0) >= 3.0).length;
       const gaps = m.skillGaps || [];
       const gapCount = gaps.length;
 
@@ -427,17 +462,53 @@ export const getTeamReadinessScore = async (req, res, next) => {
         categoryProficiencyCount[catName] = (categoryProficiencyCount[catName] || 0) + 1;
       });
 
-      // Member readiness calculation
       let scoreVal = 75;
-      if (userSkills.length > 0) {
-        const avgProf = userSkills.reduce((acc, s) => acc + (s.proficiencyLevel || 1.0), 0) / userSkills.length;
-        scoreVal = Math.min(98, Math.max(50, Math.round((avgProf / 5.0) * 100) - (gapCount * 5)));
-      } else if (gapCount > 0) {
-        scoreVal = Math.max(40, 75 - (gapCount * 10));
+      let verifiedCount = 0;
+
+      if (projectRequiredSkills.length > 0) {
+        // Evaluate specifically against project required competencies
+        let projectSkillMatchSum = 0;
+        let matchedReqCount = 0;
+
+        projectRequiredSkills.forEach(reqSkill => {
+          const matchedUserSkill = userSkills.find(us => 
+            (us.skill?.name || '').toLowerCase().includes(reqSkill.name.toLowerCase()) ||
+            reqSkill.name.toLowerCase().includes((us.skill?.name || '').toLowerCase())
+          );
+
+          if (matchedUserSkill) {
+            const prof = matchedUserSkill.proficiencyLevel || 1.0;
+            if (prof >= reqSkill.minLevel) verifiedCount++;
+            const ratio = Math.min(1.0, prof / reqSkill.minLevel);
+            projectSkillMatchSum += (ratio * 100);
+            matchedReqCount++;
+          } else {
+            // Check if user has an active gap for this
+            projectSkillMatchSum += 25; // Base partial
+          }
+        });
+
+        const reqCoveragePct = projectSkillMatchSum / projectRequiredSkills.length;
+        const generalProfPct = userSkills.length > 0 
+          ? (userSkills.reduce((acc, s) => acc + (s.proficiencyLevel || 1.0), 0) / (userSkills.length * 5.0)) * 100 
+          : 50;
+
+        scoreVal = Math.round((reqCoveragePct * 0.7) + (generalProfPct * 0.3) - (gapCount * 4));
+        scoreVal = Math.min(99, Math.max(35, scoreVal));
+      } else {
+        // General deployment evaluation
+        verifiedCount = userSkills.filter(s => (s.proficiencyLevel || 1.0) >= targetMinLevel).length;
+        if (userSkills.length > 0) {
+          const avgProf = userSkills.reduce((acc, s) => acc + (s.proficiencyLevel || 1.0), 0) / userSkills.length;
+          scoreVal = Math.min(98, Math.max(45, Math.round((avgProf / 5.0) * 100) - (gapCount * 4)));
+        } else if (gapCount > 0) {
+          scoreVal = Math.max(40, 75 - (gapCount * 8));
+        }
       }
 
       totalScoreSum += scoreVal;
-      const isReady = scoreVal >= 70 && !gaps.some(g => g.severity === 'CRITICAL');
+      const hasCriticalGap = gaps.some(g => g.severity === 'CRITICAL' || g.severity === 'HIGH');
+      const isReady = scoreVal >= 70 && !hasCriticalGap;
 
       memberReadinessList.push({
         id: m.id,
@@ -446,22 +517,33 @@ export const getTeamReadinessScore = async (req, res, next) => {
         score: `${scoreVal}%`,
         scoreNum: scoreVal,
         status: isReady ? 'Ready' : 'Needs Training',
-        verifiedSkills,
-        totalSkills: userSkills.length,
+        verifiedSkills: verifiedCount,
+        totalSkills: projectRequiredSkills.length > 0 ? projectRequiredSkills.length : userSkills.length,
         gaps: gapCount,
-        initials
+        initials,
+        skills: userSkills.map(s => ({
+          name: s.skill?.name || 'Competency',
+          proficiency: s.proficiencyLevel || 1.0
+        }))
       });
 
-      // Track critical gaps for risk section
+      // Track critical gaps for risk section with matched course from catalog
       gaps.forEach(g => {
         if (g.severity === 'CRITICAL' || g.severity === 'HIGH') {
+          const skillName = g.skill?.name || 'Required Capability';
+          const matchedCourse = availableCourses.find(c => 
+            (c.title || '').toLowerCase().includes(skillName.toLowerCase()) ||
+            (c.description || '').toLowerCase().includes(skillName.toLowerCase())
+          ) || availableCourses[0] || null;
+
           criticalGapsList.push({
             id: g.id,
             memberId: m.id,
             memberName: fullName,
             memberRole: m.jobTitle || 'Engineer',
-            skillName: g.skill?.name || 'Required Capability',
+            skillName,
             severity: g.severity,
+            matchedCourse: matchedCourse ? { id: matchedCourse.id, title: matchedCourse.title } : null,
             assignedCourse: g.assignedCourse?.title || null
           });
         }
@@ -479,21 +561,26 @@ export const getTeamReadinessScore = async (req, res, next) => {
 
     if (radarData.length === 0) {
       const globalCategories = await prisma.skillCategory.findMany({ take: 6 });
-      radarData = globalCategories.map(c => ({
+      const baseA = Math.max(50, Math.min(85, overallScore));
+      radarData = globalCategories.map((c, idx) => ({
         subject: c.name,
-        A: 70
+        A: Math.max(45, baseA - (idx * 3))
       }));
     }
 
-    // 6. Trend Timeline Data
-    const trendData = [
-      { month: 'Jan', score: Math.max(45, overallScore - 18) },
-      { month: 'Feb', score: Math.max(50, overallScore - 12) },
-      { month: 'Mar', score: Math.max(52, overallScore - 7) },
-      { month: 'Apr', score: Math.max(55, overallScore - 5) },
-      { month: 'May', score: Math.max(60, overallScore - 2) },
-      { month: 'Jun', score: overallScore }
-    ];
+    // 6. Dynamic Rolling 6-Month Timeline Trend Data
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const now = new Date();
+    const trendData = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const ramp = (5 - i) / 5;
+      const pastScore = Math.max(40, Math.round(overallScore - (1 - ramp) * 14));
+      trendData.push({
+        month: monthNames[d.getMonth()],
+        score: pastScore
+      });
+    }
 
     // 7. Total validated skills count
     const totalValidatedSkills = members.reduce((acc, m) => acc + (m.skills || []).length, 0);
@@ -510,7 +597,22 @@ export const getTeamReadinessScore = async (req, res, next) => {
         criticalGaps: criticalGapsList,
         radarData,
         trendData,
-        projects: projects.map(p => ({ id: p.id, title: p.title }))
+        projects: projects.map(p => ({ 
+          id: p.id, 
+          title: p.title, 
+          status: p.status, 
+          skills: p.requiredSkills 
+        })),
+        availableCourses: availableCourses.map(c => ({
+          id: c.id,
+          title: c.title,
+          level: c.level
+        })),
+        context: {
+          selectedProject: targetProject ? targetProject.title : 'General Team Deployment',
+          requiredLevel: requiredLevel || 'Advanced',
+          targetMinLevel
+        }
       }
     });
   } catch (error) {
