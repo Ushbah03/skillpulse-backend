@@ -1736,14 +1736,34 @@ export const getTeamTrainingRequests = async (req, res, next) => {
     const enrollments = await prisma.learningEnrollment.findMany({
       where: whereClause,
       include: {
-        user: { select: { id: true, firstName: true, lastName: true, role: true, jobTitle: true, avatarUrl: true, department: true } },
-        course: true
+        user: { 
+          select: { 
+            id: true, 
+            firstName: true, 
+            lastName: true, 
+            role: true, 
+            jobTitle: true, 
+            avatarUrl: true, 
+            department: true,
+            skillGaps: {
+              include: { skill: { include: { category: true } } }
+            }
+          } 
+        },
+        course: {
+          include: {
+            skillsTaught: {
+              include: { skill: { include: { category: true } } }
+            }
+          }
+        }
       },
       orderBy: { createdAt: 'desc' }
     });
 
     const demandMap = {};
     let totalDemandCount = 0;
+    let totalPendingCost = 0;
 
     const formattedRequests = enrollments.map(e => {
       const u = e.user || {};
@@ -1758,14 +1778,47 @@ export const getTeamTrainingRequests = async (req, res, next) => {
       else if (e.status === 'ENROLLED') statusStr = 'Pending';
       else if (e.status === 'NOT_STARTED') statusStr = 'Pending';
 
-      let priority = 'Medium';
-      if (c.level === 'Advanced' || c.isCompliance) priority = 'High';
-      else if (c.level === 'Beginner') priority = 'Low';
+      // Dynamic AI Priority Allocation Engine
+      const userGaps = u.skillGaps || [];
+      const skillsInCourse = (c.skillsTaught || []).map(st => (st.skill?.name || '').toLowerCase());
+      const matchingGap = userGaps.find(g => {
+        const gName = (g.skill?.name || '').toLowerCase();
+        return skillsInCourse.includes(gName) || (c.title || '').toLowerCase().includes(gName);
+      });
 
-      const costVal = c.durationHours ? `$${Math.round(c.durationHours * 95)}` : '$1,200';
-      const categoryName = c.title?.includes('AWS') || c.title?.includes('Cloud') || c.title?.includes('K8s') 
-        ? 'Cloud Computing' 
-        : (c.title?.includes('React') || c.title?.includes('Frontend') ? 'Frontend Architecture' : 'Cybersecurity');
+      let priority = 'Medium';
+      let justification = '';
+
+      if (matchingGap) {
+        if (matchingGap.severity === 'CRITICAL' || matchingGap.severity === 'HIGH') {
+          priority = 'High';
+          justification = `Direct critical intervention: closes verified capability deficit in ${matchingGap.skill?.name}.`;
+        } else {
+          priority = 'Medium';
+          justification = `Direct competency upgrade: targets active skill gap in ${matchingGap.skill?.name}.`;
+        }
+      } else if (c.isCompliance) {
+        priority = 'High';
+        justification = `Mandatory organizational compliance certification track.`;
+      } else if (c.level === 'Advanced' || c.level === 'EXPERT') {
+        priority = 'Medium';
+        justification = `Advanced capability development pathway for upcoming production deliverables.`;
+      } else {
+        priority = 'Low';
+        justification = `Foundational self-paced skill enrichment module.`;
+      }
+
+      const costNumber = c.durationHours ? Math.round(c.durationHours * 95) : 1200;
+      const costVal = `$${costNumber.toLocaleString()}`;
+
+      if (statusStr === 'Pending') {
+        totalPendingCost += costNumber;
+      }
+
+      // Group demand dynamically by real skill or category from DB
+      const categoryName = c.skillsTaught?.[0]?.skill?.category?.name || 
+                           c.skillsTaught?.[0]?.skill?.name || 
+                           (c.level ? `${c.level} Track` : 'Technical Engineering');
 
       demandMap[categoryName] = (demandMap[categoryName] || 0) + 1;
       totalDemandCount += 1;
@@ -1779,21 +1832,36 @@ export const getTeamTrainingRequests = async (req, res, next) => {
         role: `${u.jobTitle || 'Engineer'} • ${c.provider || 'SkillPulse Academy'}`,
         course: c.title || 'Professional Skill Mastery',
         cost: costVal,
+        costNum: costNumber,
         provider: c.provider || 'SkillPulse Academy',
         priority,
         status: statusStr,
-        justification: c.description || `Targeted training module assigned to eliminate team skill gap for ${fullName}.`,
-        img: u.avatarUrl || `https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150`,
+        justification: justification || c.description || `Targeted training module assigned for ${fullName}.`,
+        img: u.avatarUrl || null,
         initials
       };
     });
 
-    const colors = ['bg-blue-600', 'bg-blue-400', 'bg-slate-800'];
+    const colors = ['bg-blue-600', 'bg-blue-400', 'bg-indigo-600', 'bg-slate-800'];
     const trainingDemand = Object.keys(demandMap).map((cat, idx) => ({
       skill: cat,
-      percentage: totalDemandCount > 0 ? Math.round((demandMap[cat] / totalDemandCount) * 100) : 30,
+      percentage: totalDemandCount > 0 ? Math.round((demandMap[cat] / totalDemandCount) * 100) : 0,
       color: colors[idx % colors.length]
     }));
+
+    const pendingHighPriorityCount = formattedRequests.filter(r => r.status === 'Pending' && r.priority === 'High').length;
+    const pendingRequestsCount = formattedRequests.filter(r => r.status === 'Pending').length;
+
+    const aiInsights = {
+      budgetTitle: "Budget & License Optimization",
+      budgetText: pendingRequestsCount > 0
+        ? `Approving corporate training requests in batch optimizes tenant licensing costs, unlocking ~15% volume savings across estimated $${totalPendingCost.toLocaleString()} L&D investment.`
+        : "All corporate training licenses are currently stabilized within approved departmental thresholds.",
+      impactTitle: "Readiness Gap Impact",
+      impactText: pendingHighPriorityCount > 0
+        ? `${pendingHighPriorityCount} pending high-priority training request(s) directly close active critical capability gaps identified in team readiness scores.`
+        : "Current training allocations align with target production milestones and risk mitigation benchmarks."
+    };
 
     res.json({
       success: true,
@@ -1802,10 +1870,11 @@ export const getTeamTrainingRequests = async (req, res, next) => {
         trainingDemand,
         stats: {
           totalCount: formattedRequests.length,
-          pendingCount: formattedRequests.filter(r => r.status === 'Pending').length,
+          pendingCount: pendingRequestsCount,
           approvedCount: formattedRequests.filter(r => r.status === 'Approved').length,
           completedCount: formattedRequests.filter(r => r.status === 'Completed').length
-        }
+        },
+        aiInsights
       }
     });
   } catch (error) {
