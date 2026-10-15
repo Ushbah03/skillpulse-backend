@@ -1000,9 +1000,14 @@ export const getMemberProfileDetail = async (req, res, next) => {
     assessments.forEach(a => {
       totalAssessScore += (a.score || 0);
     });
-    const avgAssessScore = assessments.length > 0 
-      ? (totalAssessScore / assessments.length).toFixed(1) 
-      : (skills.length > 0 ? (totalProficiency / skills.length).toFixed(1) : "0.0");
+    let avgAssessScore = "0.0";
+    if (assessments.length > 0) {
+      const rawAvg = totalAssessScore / assessments.length;
+      const normalizedRating = rawAvg > 5.0 ? (rawAvg / 20.0) : rawAvg;
+      avgAssessScore = normalizedRating.toFixed(1);
+    } else if (skills.length > 0) {
+      avgAssessScore = (totalProficiency / skills.length).toFixed(1);
+    }
 
     const completedEnrollments = enrollments.filter(e => e.status === 'COMPLETED' || e.progressPct >= 100).length;
     const completionRate = enrollments.length > 0 ? Math.round((completedEnrollments / enrollments.length) * 100) : 0;
