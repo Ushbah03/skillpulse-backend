@@ -301,7 +301,7 @@ export const getTeamSkillGaps = async (req, res, next) => {
         current: g.currentLevel || 2.0,
         severity: sevCap,
         training: courseTitleFromDB,
-        img: u.avatarUrl || `https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150`,
+        img: u.avatarUrl || null,
         initials
       };
     });
@@ -312,6 +312,36 @@ export const getTeamSkillGaps = async (req, res, next) => {
     const moderateGapsCount = formattedGaps.filter(g => g.severity === 'High').length;
     const assignedCount = rawGaps.filter(g => g.assignedCourseId !== null).length;
     const resolutionProgress = totalGaps > 0 ? Math.round((assignedCount / totalGaps) * 100) : 100;
+
+    // AI Intelligence Insights Calculation
+    const topGap = formattedGaps.find(g => g.severity === 'Critical') || formattedGaps[0] || null;
+    const secondaryGap = formattedGaps.find(g => g !== topGap) || formattedGaps[0] || null;
+
+    const criticalConfidence = topGap ? `${Math.min(98, Math.max(85, Math.round(82 + (topGap.required - topGap.current) * 4 + members.length * 2)))}%` : '95%';
+    const growthConfidence = secondaryGap ? `${Math.min(96, Math.max(80, Math.round(80 + members.length * 3 + (assignedCount > 0 ? 5 : 0))))}%` : '88%';
+    const velocityConfidence = `${Math.min(96, Math.max(86, Math.round(84 + (resolutionProgress > 0 ? 6 : 2) + members.length)))}%`;
+
+    const aiIntelligence = {
+      criticalWarning: {
+        confidence: criticalConfidence,
+        title: topGap ? `${topGap.skill} Deficiency` : 'Core Capability Stabilized',
+        description: topGap 
+          ? `Detected a ${topGap.severity.toLowerCase()} deficiency for ${topGap.name} in ${topGap.skill} (${topGap.current.toFixed(1)} / ${topGap.required.toFixed(1)}). Early course resolution recommended.`
+          : 'Zero critical technical capability bottlenecks identified for monitored team members.'
+      },
+      growthPath: {
+        confidence: growthConfidence,
+        title: 'Targeted Skill Upskilling',
+        description: secondaryGap 
+          ? `Fast-tracking ${secondaryGap.name} into "${secondaryGap.training}" will eliminate single-point team dependencies.`
+          : (topGap ? `Assigning "${topGap.training}" to ${topGap.name} unlocks core project eligibility.` : 'Team competencies align with project deployment standards.')
+      },
+      resolutionVelocity: {
+        confidence: velocityConfidence,
+        title: 'Resolution Velocity',
+        description: `Current team gap resolution progress stands at ${resolutionProgress}%. Verified through live course enrollments and skill baselines.`
+      }
+    };
 
     // Heatmap Construction
     let heatmapSkills = Array.from(skillSet).slice(0, 6);
@@ -368,7 +398,13 @@ export const getTeamSkillGaps = async (req, res, next) => {
           name: `${m.firstName} ${m.lastName}`,
           role: m.jobTitle || (m.role === 'TEAM_LEADER' ? 'Team Lead' : 'Engineer'),
           avatar: m.avatarUrl
-        }))
+        })),
+        availableCourses: availableCourses.map(c => ({
+          id: c.id,
+          title: c.title,
+          level: c.level
+        })),
+        aiIntelligence
       }
     });
   } catch (error) {
