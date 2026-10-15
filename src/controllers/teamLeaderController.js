@@ -172,14 +172,24 @@ export const getTeamSkillGaps = async (req, res, next) => {
       }
     });
 
-    // Fetch raw gaps
+    // Fetch raw gaps with user enrollments
     let rawGaps = await prisma.skillGap.findMany({
       where: {
         tenantId,
         userId: { in: memberIds }
       },
       include: {
-        user: { select: { id: true, firstName: true, lastName: true, role: true, jobTitle: true, avatarUrl: true } },
+        user: { 
+          select: { 
+            id: true, 
+            firstName: true, 
+            lastName: true, 
+            role: true, 
+            jobTitle: true, 
+            avatarUrl: true,
+            enrollments: { select: { courseId: true, status: true, progressPct: true } }
+          } 
+        },
         skill: { include: { category: true } },
         assignedCourse: true
       },
@@ -211,7 +221,17 @@ export const getTeamSkillGaps = async (req, res, next) => {
             userId: { in: memberIds }
           },
           include: {
-            user: { select: { id: true, firstName: true, lastName: true, role: true, jobTitle: true, avatarUrl: true } },
+            user: { 
+              select: { 
+                id: true, 
+                firstName: true, 
+                lastName: true, 
+                role: true, 
+                jobTitle: true, 
+                avatarUrl: true,
+                enrollments: { select: { courseId: true, status: true, progressPct: true } }
+              } 
+            },
             skill: { include: { category: true } },
             assignedCourse: true
           },
@@ -230,10 +250,10 @@ export const getTeamSkillGaps = async (req, res, next) => {
       }
     });
 
-    // Helper to find real available course from DB
+    // Helper to find real available course from DB matching the skill
     const findAvailableCourse = (skillObj) => {
       if (!availableCourses || availableCourses.length === 0) return null;
-      if (!skillObj) return availableCourses[0];
+      if (!skillObj) return null;
 
       // 1. Direct CourseSkill match
       let matched = availableCourses.find(c =>
@@ -261,8 +281,8 @@ export const getTeamSkillGaps = async (req, res, next) => {
         if (matched) return matched;
       }
 
-      // 4. Default to first course in DB catalog
-      return availableCourses[0];
+      // If no logical match found, return null (do not recommend irrelevant courses)
+      return null;
     };
 
     // Transform gaps data for frontend UI
@@ -284,9 +304,15 @@ export const getTeamSkillGaps = async (req, res, next) => {
       else if (g.severity === 'LOW') sevCap = 'Low';
       else if (g.severity === 'MEDIUM') sevCap = 'High';
 
+      // Check user's active enrollments
+      const userEnrollments = u.enrollments || [];
+      const enrolledCourseIds = userEnrollments.map(e => e.courseId);
+
       // Find recommended course ONLY from real DB Course records
       const recommendedCourse = g.assignedCourse || findAvailableCourse(g.skill);
-      const courseTitleFromDB = recommendedCourse ? recommendedCourse.title : 'General Technical Mastery Track';
+      const hasMatchingCourse = !!recommendedCourse;
+      const courseTitleFromDB = recommendedCourse ? recommendedCourse.title : null;
+      const isAlreadyEnrolled = recommendedCourse ? (enrolledCourseIds.includes(recommendedCourse.id) || g.assignedCourseId !== null) : false;
 
       return {
         id: g.id,
@@ -301,6 +327,10 @@ export const getTeamSkillGaps = async (req, res, next) => {
         current: g.currentLevel || 2.0,
         severity: sevCap,
         training: courseTitleFromDB,
+        hasMatchingCourse,
+        isAlreadyEnrolled,
+        enrolledCourseIds,
+        noCourseMessage: "No matching course currently in catalog. A suitable course will be recommended soon.",
         img: u.avatarUrl || null,
         initials
       };
