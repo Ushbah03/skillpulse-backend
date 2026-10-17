@@ -7,6 +7,7 @@ import {
   approveHiringPlan,
   getSuccessionPipelines,
   getComplianceStatus,
+  sendComplianceReminders,
   getTrainingPrograms,
   createCourse
 } from '../controllers/hrController.js';
@@ -31,6 +32,7 @@ router.post('/sync-recruitment', syncRecruitment);
 router.post('/approve-hiring-plan', approveHiringPlan);
 router.get('/succession', getSuccessionPipelines);
 router.get('/compliance', getComplianceStatus);
+router.post('/compliance/reminders', sendComplianceReminders);
 router.get('/training', getTrainingPrograms);
 router.post('/courses', createCourse);
 router.get('/training-requests', getTeamTrainingRequests);
