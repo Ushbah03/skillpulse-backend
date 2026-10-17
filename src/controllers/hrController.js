@@ -85,14 +85,28 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       }
     });
 
+    const competencyPillars = [
+      { key: 'cloudArch', name: 'Cloud & Systems', match: /cloud|aws|docker|k8s|kubernetes|devops|infra|linux|system|architect/i },
+      { key: 'softwareEng', name: 'Software Eng', match: /react|node|javascript|typescript|python|java|backend|frontend|express|sql|db|api/i },
+      { key: 'productDesign', name: 'Product & Design', match: /figma|design|ui|ux|canva|motion|prototype/i },
+      { key: 'dataAi', name: 'Data & AI', match: /ai|data|ml|agentic|analytics|gpt|gemini|groq/i },
+      { key: 'softSkills', name: 'Problem Solving', match: /problem|critical|solving|analytical|reasoning/i },
+      { key: 'leadership', name: 'Leadership & Collab', match: /leadership|agile|scrum|mentorship|communication|workplace/i }
+    ];
+
     const formattedSkillGaps = rawGaps.map(g => {
       const matchedCourse = g.assignedCourse || findAvailableCourse(g.skill);
+      const reqLvl = g.requiredLevel || 5.0;
+      const curLvl = g.currentLevel || 0.0;
+      const gapPct = Math.max(0, Math.min(100, Math.round(((reqLvl - curLvl) / reqLvl) * 100)));
+
       return {
         id: g.id,
         userId: g.userId,
         skillId: g.skillId,
-        currentLevel: g.currentLevel,
-        requiredLevel: g.requiredLevel,
+        currentLevel: curLvl,
+        requiredLevel: reqLvl,
+        gapPct,
         severity: g.severity,
         assignedCourseId: g.assignedCourseId,
         courseId: matchedCourse?.id || null,
@@ -109,21 +123,20 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
     const criticalGapsCount = formattedSkillGaps.filter(g => g.severity === 'CRITICAL').length;
     const totalGapsCount = formattedSkillGaps.length;
 
-    // Rolling 6-month historical & target trend line
+    // Rolling 6-month historical & target trend from real DB records
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const now = new Date();
     const gapTrend = [];
 
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
       const mName = monthNames[d.getMonth()];
-      const ramp = (5 - i) / 5; // 0 to 1
-      const gapVal = Math.round(totalGapsCount * (1.25 - ramp * 0.25));
-      const targetVal = Math.max(0, Math.round(totalGapsCount * 0.3));
+      const countUpToMonth = rawGaps.filter(g => new Date(g.createdAt) <= endOfMonth).length;
       gapTrend.push({
         month: mName,
-        gaps: gapVal,
-        target: targetVal
+        gaps: countUpToMonth,
+        target: Math.max(0, Math.round(countUpToMonth * 0.3))
       });
     }
 
@@ -157,25 +170,52 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       complianceRate: `${complianceRateVal}%`,
       aiInsight: aiInsightText,
       gapTrend,
+      heatmapColumns: competencyPillars.map(p => p.name.toUpperCase()),
       departments: departments.map(d => {
         let totalMemberSkills = 0;
         let sumMemberProficiency = 0;
+        const pillarSums = { cloudArch: [], softwareEng: [], productDesign: [], dataAi: [], softSkills: [], leadership: [] };
+
         d.members.forEach(member => {
           member.skills.forEach(s => {
+            const lvl = s.proficiencyLevel || 0;
+            const sName = (s.skill?.name || '').toLowerCase();
+            const catName = (s.skill?.category?.name || '').toLowerCase();
             totalMemberSkills += 1;
-            sumMemberProficiency += (s.proficiencyLevel || 0);
+            sumMemberProficiency += lvl;
+
+            competencyPillars.forEach(p => {
+              if (p.match.test(sName) || p.match.test(catName)) {
+                pillarSums[p.key].push(lvl);
+              }
+            });
           });
         });
+
         const hasSkills = totalMemberSkills > 0;
         const avgProficiency = hasSkills 
           ? parseFloat((sumMemberProficiency / totalMemberSkills).toFixed(1)) 
           : 0.0;
 
+        const deficiencyPct = hasSkills
+          ? Math.max(0, 100 - Math.round((avgProficiency / 5.0) * 100))
+          : 0;
+
+        const scores = competencyPillars.map(p => {
+          const arr = pillarSums[p.key];
+          return arr.length > 0 
+            ? parseFloat((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1))
+            : 0.0;
+        });
+
         return {
           id: d.id,
           name: d.name,
           memberCount: d.members.length,
-          avgProficiency
+          avgProficiency,
+          gapPct: deficiencyPct,
+          hasSkills,
+          scores
         };
       }),
       categoryDistribution: categoryStats.map(c => ({
