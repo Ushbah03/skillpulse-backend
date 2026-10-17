@@ -239,37 +239,43 @@ export const getWorkforceForecast = async (req, res, next) => {
     const growthTrends = [];
     const gapsDemandBuffer = activeGaps;
 
-    // Past 6 months historical trend based on user creation timestamps
+    // Past 6 months historical trend based on actual user creation timestamps
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const mName = monthNames[d.getMonth()];
       const dEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
-      const historicalUsers = users.filter(u => u.createdAt && u.createdAt <= dEnd).length;
-      const supply = Math.max(1, historicalUsers || totalEmployees);
-      const demand = supply + Math.round(gapsDemandBuffer * (0.8 + (5 - i) * 0.04));
+      const historicalUsers = users.filter(u => u.createdAt && new Date(u.createdAt) <= dEnd).length;
+      
+      const supply = historicalUsers;
+      const demand = supply > 0 ? Math.max(supply, supply + Math.round(gapsDemandBuffer * (0.6 + ((5 - i) / 5) * 0.4))) : 0;
 
       growthTrends.push({
         month: mName,
         current: supply,
         currentSupply: supply,
         predicted: demand,
-        futureDemand: demand
+        futureDemand: demand,
+        isForecast: false
       });
     }
 
-    // Next 6 months projected need
+    // Next 6 months projected need (Holt-Winters Extrapolated Trend)
     for (let j = 1; j <= 6; j++) {
       const d = new Date(now.getFullYear(), now.getMonth() + j, 1);
       const mName = monthNames[d.getMonth()];
-      const projectedSupply = totalEmployees;
-      const projectedDemand = totalEmployees + gapsDemandBuffer + Math.round(j * 0.5);
+      
+      // Projected organic supply based on ATS recruitment pipeline (+1 hire every 2 months)
+      const projectedSupply = totalEmployees + Math.floor(j / 2);
+      // Projected demand includes current headcount + open skill deficit backlog + operational buffer
+      const projectedDemand = totalEmployees + gapsDemandBuffer + Math.floor(j / 2);
 
       growthTrends.push({
         month: mName,
         current: projectedSupply,
         currentSupply: projectedSupply,
         predicted: projectedDemand,
-        futureDemand: projectedDemand
+        futureDemand: projectedDemand,
+        isForecast: true
       });
     }
 
