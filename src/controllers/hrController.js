@@ -889,9 +889,10 @@ export const getTrainingPrograms = async (req, res, next) => {
     const enrollments = await prisma.learningEnrollment.findMany({
       where: { tenantId },
       include: {
-        user: { select: { firstName: true, lastName: true, department: { select: { name: true } } } },
-        course: { select: { title: true, level: true } }
-      }
+        user: { select: { id: true, firstName: true, lastName: true, avatarUrl: true, department: { select: { name: true } } } },
+        course: { select: { id: true, title: true, level: true, provider: true, thumbnailUrl: true } }
+      },
+      orderBy: { createdAt: 'desc' }
     });
 
     const totalTenantUsers = await prisma.user.count({ where: { tenantId, role: 'EMPLOYEE' } });
