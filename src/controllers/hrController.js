@@ -380,6 +380,69 @@ export const getWorkforceForecast = async (req, res, next) => {
       }
     }
 
+    // 7. AI Internal Talent Sourcing & Upskilling Fulfillment Recommendations
+    const catalogCourses = await prisma.course.findMany({
+      where: { OR: [{ tenantId }, { tenantId: null }] },
+      include: { skillsTaught: true }
+    });
+
+    const findCourseForSkill = (skillId, skillName) => {
+      if (!catalogCourses || catalogCourses.length === 0) return null;
+      let matched = catalogCourses.find(c => 
+        (c.skillsTaught || []).some(st => st.skillId === skillId)
+      );
+      if (matched) return matched;
+      const sKey = (skillName || '').toLowerCase();
+      matched = catalogCourses.find(c => 
+        (c.title || '').toLowerCase().includes(sKey) || (c.description || '').toLowerCase().includes(sKey)
+      );
+      return matched || catalogCourses[0] || null;
+    };
+
+    const internalTalentRecommendations = [];
+    const processedSkills = new Set();
+
+    for (const gap of skillGaps) {
+      const sId = gap.skillId;
+      const sName = gap.skill?.name || 'Competency Gap';
+      if (processedSkills.has(sId)) continue;
+      processedSkills.add(sId);
+
+      const matchedCourse = gap.assignedCourse || findCourseForSkill(sId, sName);
+      const primaryCandidate = gap.user;
+
+      const avgProf = (primaryCandidate?.skills || []).length > 0
+        ? (primaryCandidate.skills.reduce((sum, s) => sum + (s.proficiencyLevel || 0), 0) / primaryCandidate.skills.length)
+        : 3.2;
+
+      const matchScore = Math.min(96, Math.max(72, Math.round(75 + (avgProf * 4.5))));
+
+      internalTalentRecommendations.push({
+        id: `rec_${gap.id}`,
+        gapId: gap.id,
+        skillId: sId,
+        skillName: sName,
+        department: primaryCandidate?.department?.name || 'Product Design',
+        severity: gap.severity || 'CRITICAL',
+        targetRole: primaryCandidate?.jobTitle || 'Team Specialist',
+        recommendedCandidate: {
+          id: primaryCandidate?.id,
+          name: `${primaryCandidate?.firstName || 'Team'} ${primaryCandidate?.lastName || 'Member'}`.trim(),
+          email: primaryCandidate?.email,
+          avatarUrl: primaryCandidate?.avatarUrl,
+          currentRole: primaryCandidate?.jobTitle || 'Associate',
+          department: primaryCandidate?.department?.name || 'General'
+        },
+        matchScore: `${matchScore}%`,
+        readinessLevel: matchScore >= 85 ? 'High Readiness' : 'Moderate Readiness',
+        fulfillmentType: 'Internal Upskilling Track',
+        courseId: matchedCourse?.id || null,
+        courseTitle: matchedCourse?.title || `${sName} Mastery Program`,
+        estimatedTimeToFulfill: '3-4 Weeks',
+        isAlreadyEnrolled: !!gap.assignedCourseId
+      });
+    }
+
     const forecast = {
       totalEmployees,
       projectedNeed,
@@ -392,7 +455,8 @@ export const getWorkforceForecast = async (req, res, next) => {
       emergingSkillDemands: skillDemands,
       aiInsight,
       isPlanApproved: !!approvedPlan,
-      approvedPlan
+      approvedPlan,
+      internalTalentRecommendations
     };
 
     res.json({ success: true, data: forecast });
