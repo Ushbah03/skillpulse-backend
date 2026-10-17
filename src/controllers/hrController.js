@@ -619,7 +619,7 @@ export const getSuccessionPipelines = async (req, res, next) => {
                 id: true,
                 title: true,
                 level: true,
-                durationHours: true
+                durationWeeks: true
               }
             }
           }
@@ -921,16 +921,14 @@ export const allocateSuccessionTraining = async (req, res, next) => {
       },
       update: {
         status: 'IN_PROGRESS',
-        progressPct: 10.0,
-        courseTitle: targetCourse.title
+        progress: 10
       },
       create: {
         tenantId,
         userId: candidate.id,
         courseId: targetCourse.id,
-        courseTitle: targetCourse.title,
         status: 'IN_PROGRESS',
-        progressPct: 10.0
+        progress: 10
       }
     });
 
