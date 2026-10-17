@@ -107,6 +107,7 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
     const assignedGaps = formattedSkillGaps.filter(g => g.assignedCourseId);
     const unassignedCriticalCount = unassignedGaps.filter(g => g.severity === 'CRITICAL').length;
     const criticalGapsCount = formattedSkillGaps.filter(g => g.severity === 'CRITICAL').length;
+    const totalGapsCount = formattedSkillGaps.length;
 
     // Rolling 6-month historical & target trend line
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
