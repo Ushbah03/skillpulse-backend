@@ -230,7 +230,9 @@ export const getWorkforceForecast = async (req, res, next) => {
       return {
         month: m,
         current: currentPct,
-        predicted: predictedPct
+        currentSupply: currentPct,
+        predicted: predictedPct,
+        futureDemand: predictedPct
       };
     });
 
