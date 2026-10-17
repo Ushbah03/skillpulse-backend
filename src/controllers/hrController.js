@@ -103,8 +103,10 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       };
     });
 
+    const unassignedGaps = formattedSkillGaps.filter(g => !g.assignedCourseId);
+    const assignedGaps = formattedSkillGaps.filter(g => g.assignedCourseId);
+    const unassignedCriticalCount = unassignedGaps.filter(g => g.severity === 'CRITICAL').length;
     const criticalGapsCount = formattedSkillGaps.filter(g => g.severity === 'CRITICAL').length;
-    const totalGapsCount = formattedSkillGaps.length;
 
     // Rolling 6-month historical & target trend line
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -134,8 +136,10 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
     const topGapCategory = topCategoryEntry ? topCategoryEntry[0] : null;
 
     let aiInsightText = '';
-    if (criticalGapsCount > 0) {
-      aiInsightText = `${criticalGapsCount} critical capability deficit${criticalGapsCount > 1 ? 's' : ''} detected${topGapCategory ? ` concentrated in ${topGapCategory}` : ''}. Deploying targeted courseware is projected to elevate overall workforce match by +${Math.min(25, Math.round(criticalGapsCount * 3.5))}%.`;
+    if (unassignedCriticalCount > 0) {
+      aiInsightText = `${unassignedCriticalCount} critical capability deficit${unassignedCriticalCount > 1 ? 's' : ''} detected${topGapCategory ? ` concentrated in ${topGapCategory}` : ''}. Deploying targeted courseware is projected to elevate overall workforce match by +${Math.min(25, Math.round(unassignedCriticalCount * 3.5))}%.`;
+    } else if (assignedGaps.length > 0) {
+      aiInsightText = `Targeted training tracks are actively assigned to all ${assignedGaps.length} identified employee${assignedGaps.length > 1 ? 's' : ''}. Upskilling is in progress across active departments.`;
     } else if (totalGapsCount > 0) {
       aiInsightText = `Identified ${totalGapsCount} skill development opportunities across active departments. Structured learning tracks recommended to sustain operational readiness.`;
     } else {
@@ -145,6 +149,9 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
     const analytics = {
       totalEmployees: totalEmployeesCount,
       criticalGapsCount,
+      unassignedCriticalCount,
+      unassignedCount: unassignedGaps.length,
+      assignedCount: assignedGaps.length,
       averageReadiness,
       complianceRate: `${complianceRateVal}%`,
       aiInsight: aiInsightText,
