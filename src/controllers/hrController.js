@@ -920,6 +920,18 @@ export const getTrainingPrograms = async (req, res, next) => {
       };
     });
 
+    // Real monthly completions from database enrollments
+    const monthNames = ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'];
+    const now = new Date();
+    const monthlyCompletions = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+      const mName = monthNames[d.getMonth()] || 'Month';
+      const count = enrollments.filter(e => e.status === 'COMPLETED' && e.completedAt && new Date(e.completedAt) <= endOfMonth).length;
+      monthlyCompletions.push({ month: mName, count });
+    }
+
     res.json({
       success: true,
       data: {
@@ -928,7 +940,8 @@ export const getTrainingPrograms = async (req, res, next) => {
         pendingCount,
         completedCount,
         programs: formattedPrograms,
-        enrollments
+        enrollments,
+        monthlyCompletions
       }
     });
   } catch (error) {
