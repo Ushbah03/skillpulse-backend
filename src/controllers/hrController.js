@@ -344,13 +344,21 @@ export const getWorkforceForecast = async (req, res, next) => {
     const totalFlightRisk = departmentAttrition.reduce((sum, d) => sum + (d.atRiskCount || 0), 0);
     const projectedNeed = totalEmployees + activeGaps;
 
-    // 6. Dynamic Prescriptive AI Insight
+    // 6. Dynamic Prescriptive AI Insight (Pareto Deficit Bottleneck Detection)
     let aiInsight = '';
-    const topDemand = skillDemands[0];
-    if (activeGaps > 0 && topDemand) {
-      aiInsight = `AI workforce forecasting detects ${activeGaps} competency deficit${activeGaps > 1 ? 's' : ''} expanding 6-month projected talent demand to ${projectedNeed} personnel. Primary hiring & training priority detected in ${topDemand.dept} for ${topDemand.skill}.`;
+    const deptGapTotals = {};
+    skillGaps.forEach(g => {
+      const dName = g.user?.department?.name || 'Unassigned';
+      deptGapTotals[dName] = (deptGapTotals[dName] || 0) + 1;
+    });
+    const topDeficitDeptEntry = Object.entries(deptGapTotals).sort((a, b) => b[1] - a[1])[0];
+    const topDeptName = topDeficitDeptEntry ? topDeficitDeptEntry[0] : (topDemand?.dept || 'Operations');
+    const topDeptGapsCount = topDeficitDeptEntry ? topDeficitDeptEntry[1] : 0;
+
+    if (activeGaps > 0) {
+      aiInsight = `AI predictive forecasting detects ${activeGaps} competency deficits expanding 6-month projected workforce demand to ${projectedNeed} personnel. Primary capacity bottleneck identified in ${topDeptName} (${topDeptGapsCount} open deficit roles). Targeted upskilling & ATS recruitment requisition sync recommended.`;
     } else {
-      aiInsight = `Current workforce capacity of ${totalEmployees} active personnel aligns with operational readiness benchmarks across all departments.`;
+      aiInsight = `Current workforce capacity of ${totalEmployees} active personnel aligns with operational readiness benchmarks across all departments with zero talent deficits.`;
     }
 
     const forecast = {
