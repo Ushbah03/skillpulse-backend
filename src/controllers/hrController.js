@@ -361,6 +361,25 @@ export const getWorkforceForecast = async (req, res, next) => {
       aiInsight = `Current workforce capacity of ${totalEmployees} active personnel aligns with operational readiness benchmarks across all departments with zero talent deficits.`;
     }
 
+    // Check if an approved hiring plan exists in DB for this tenant
+    const existingPlan = await prisma.systemParameter.findUnique({
+      where: {
+        tenantId_key: {
+          tenantId,
+          key: `HIRING_PLAN_2026-2027`
+        }
+      }
+    });
+
+    let approvedPlan = null;
+    if (existingPlan && existingPlan.value) {
+      try {
+        approvedPlan = JSON.parse(existingPlan.value);
+      } catch (e) {
+        approvedPlan = null;
+      }
+    }
+
     const forecast = {
       totalEmployees,
       projectedNeed,
@@ -371,7 +390,9 @@ export const getWorkforceForecast = async (req, res, next) => {
       departmentAttrition,
       skillDemands,
       emergingSkillDemands: skillDemands,
-      aiInsight
+      aiInsight,
+      isPlanApproved: !!approvedPlan,
+      approvedPlan
     };
 
     res.json({ success: true, data: forecast });
@@ -439,9 +460,60 @@ export const syncRecruitment = async (req, res, next) => {
 export const approveHiringPlan = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
+    const userId = req.user?.id || null;
+    const { projectedNeed, targetFiscalYear = "2026-2027" } = req.body;
+
+    const totalEmployees = await prisma.user.count({ where: { tenantId } });
+    const activeGaps = await prisma.skillGap.count({ where: { tenantId } });
+    const targetNeed = Number(projectedNeed) || (totalEmployees + activeGaps);
+
+    const planPayload = {
+      status: "APPROVED",
+      fiscalYear: targetFiscalYear,
+      targetHeadcount: targetNeed,
+      currentWorkforce: totalEmployees,
+      activeGapsCount: activeGaps,
+      approvedAt: new Date().toISOString(),
+      approvedByUserId: userId
+    };
+
+    // 1. Persist to SystemParameter for this tenant
+    await prisma.systemParameter.upsert({
+      where: {
+        tenantId_key: {
+          tenantId,
+          key: `HIRING_PLAN_${targetFiscalYear}`
+        }
+      },
+      update: {
+        value: JSON.stringify(planPayload),
+        description: `Strategic hiring plan approved for fiscal year ${targetFiscalYear}`,
+        updatedAt: new Date()
+      },
+      create: {
+        tenantId,
+        key: `HIRING_PLAN_${targetFiscalYear}`,
+        value: JSON.stringify(planPayload),
+        description: `Strategic hiring plan approved for fiscal year ${targetFiscalYear}`,
+        isGlobal: false
+      }
+    });
+
+    // 2. Persist real AuditLog record
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId,
+        action: "HIRING_PLAN_APPROVED",
+        resource: "WorkforcePlanning",
+        details: planPayload
+      }
+    });
+
     res.json({
       success: true,
-      message: `Strategic workforce recruitment plan approved for active fiscal cycle.`
+      message: `Strategic hiring plan of ${targetNeed} personnel approved and locked for fiscal year ${targetFiscalYear}.`,
+      plan: planPayload
     });
   } catch (err) {
     next(err);
