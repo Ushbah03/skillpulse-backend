@@ -6,7 +6,6 @@ import {
   syncRecruitment,
   approveHiringPlan,
   getSuccessionPipelines,
-  allocateSuccessionTraining,
   getComplianceStatus,
   sendComplianceReminders,
   getTrainingPrograms,
@@ -32,7 +31,6 @@ router.post('/reallocate-headcount', reallocateHeadcount);
 router.post('/sync-recruitment', syncRecruitment);
 router.post('/approve-hiring-plan', approveHiringPlan);
 router.get('/succession', getSuccessionPipelines);
-router.post('/succession/allocate-training', allocateSuccessionTraining);
 router.get('/compliance', getComplianceStatus);
 router.post('/compliance/reminders', sendComplianceReminders);
 router.get('/training', getTrainingPrograms);

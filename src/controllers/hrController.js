@@ -588,375 +588,72 @@ export const getSuccessionPipelines = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
 
-    // Fetch tenant employees with skills, gaps, and enrollments
-    const employees = await prisma.user.findMany({
-      where: {
-        tenantId,
-        role: { in: ['EMPLOYEE', 'TEAM_LEADER'] }
-      },
+    let successionPools = await prisma.successionPool.findMany({
+      where: { tenantId },
       include: {
-        department: { select: { id: true, name: true } },
-        skills: {
-          include: {
-            skill: {
-              select: {
-                id: true,
-                name: true,
-                category: { select: { id: true, name: true } }
-              }
-            }
-          }
-        },
-        skillGaps: {
-          include: {
-            skill: { select: { id: true, name: true } }
-          }
-        },
-        enrollments: {
-          include: {
-            course: {
-              select: {
-                id: true,
-                title: true,
-                level: true,
-                durationWeeks: true
-              }
-            }
+        candidate: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            jobTitle: true,
+            avatarUrl: true,
+            department: { select: { name: true } },
+            skills: { include: { skill: true } }
           }
         }
-      },
-      orderBy: { createdAt: 'asc' }
+      }
     });
 
-    // Pure mathematical AI Leadership Readiness Index calculation per employee
-    const successionPools = employees.map((emp) => {
-      const skillsCount = emp.skills.length;
-      const criticalGapsCount = emp.skillGaps.filter(g => g.severity === 'CRITICAL').length;
-      const totalGapsCount = emp.skillGaps.length;
-
-      // Mathematical LRI: Evaluates verified proficiencies against 4.5 executive target benchmark
-      let leadershipScore = 0;
-      if (skillsCount > 0) {
-        const totalFulfillment = emp.skills.reduce((sum, s) => {
-          const ratio = Math.min(1.0, (s.proficiencyLevel || 0) / 4.5);
-          return sum + ratio;
-        }, 0);
-        leadershipScore = Math.min(100, Math.round((totalFulfillment / skillsCount) * 100));
-      }
-
-      // Department-aligned Target Executive Role
-      const deptName = (emp.department?.name || '').toLowerCase();
-      let targetRole = 'Executive Leadership Bench';
-      if (/develop|engineer|software|cloud|tech/i.test(deptName)) {
-        targetRole = 'CTO Bench Candidate';
-      } else if (/product|design|ui|ux/i.test(deptName)) {
-        targetRole = 'Director of Product Design';
-      } else if (/market|sales|growth/i.test(deptName)) {
-        targetRole = 'Chief Marketing Officer (CMO)';
-      } else if (/hr|human|people|talent/i.test(deptName)) {
-        targetRole = 'Chief People Officer (CPO)';
-      } else if (/operat/i.test(deptName)) {
-        targetRole = 'COO Bench Candidate';
-      }
-
-      // Deterministic Readiness Tiering based on LRI and unresolved critical gaps
-      let readinessKey = 'NOT_READY';
-      let readinessLabel = 'Not Ready';
-      let timeToReadyMonths = 24;
-
-      if (leadershipScore >= 85 && criticalGapsCount === 0) {
-        readinessKey = 'READY_NOW';
-        readinessLabel = 'Ready Now';
-        timeToReadyMonths = 0;
-      } else if (leadershipScore >= 70 || (leadershipScore >= 60 && criticalGapsCount <= 1)) {
-        readinessKey = 'WITHIN_1_YEAR';
-        readinessLabel = 'Ready in 1 Yr';
-        timeToReadyMonths = Math.max(3, Math.ceil(((85 - leadershipScore) / 15) * 12));
-      } else if (leadershipScore >= 45 || criticalGapsCount >= 2) {
-        readinessKey = 'WITHIN_2_YEARS';
-        readinessLabel = 'Ready in 2 Yrs';
-        timeToReadyMonths = Math.max(12, Math.ceil(((85 - leadershipScore) / 40) * 24));
-      }
-
-      // AI Flight Risk: High competence without active development increases headhunting hazard
-      let flightRisk = 'LOW';
-      if (leadershipScore >= 80 && emp.enrollments.length === 0) {
-        flightRisk = 'HIGH';
-      } else if (criticalGapsCount > 1 || (leadershipScore >= 65 && leadershipScore < 80)) {
-        flightRisk = 'MEDIUM';
-      }
-
-      // Multi-dimensional Competency Radar Coordinates (6 distinct categorical axes)
-      const catMap = {
-        tech: [],
-        strategic: [],
-        operations: [],
-        leadership: [],
-        design: [],
-        problemSolving: []
-      };
-
-      emp.skills.forEach(s => {
-        const name = (s.skill.name || '').toLowerCase();
-        const score = (s.proficiencyLevel || 0) / 5.0;
-        if (/react|node|docker|k8s|kubernetes|aws|python|java|api|sql|db/i.test(name)) {
-          catMap.tech.push(score);
-        } else if (/architect|system|strategy|agile|scrum/i.test(name)) {
-          catMap.strategic.push(score);
-        } else if (/ci\/cd|devops|linux|cloud|infra|security/i.test(name)) {
-          catMap.operations.push(score);
-        } else if (/leadership|mentor|manage|communicat/i.test(name)) {
-          catMap.leadership.push(score);
-        } else if (/figma|canva|ui|ux|design|seo|market/i.test(name)) {
-          catMap.design.push(score);
-        } else {
-          catMap.problemSolving.push(score);
-        }
+    if (successionPools.length === 0) {
+      const tenantEmployees = await prisma.user.findMany({
+        where: { tenantId, role: 'EMPLOYEE' },
+        include: {
+          department: { select: { name: true } },
+          skills: { include: { skill: true } }
+        },
+        take: 6
       });
 
-      const avgCat = (arr) => arr.length > 0 ? parseFloat((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2)) : 0.0;
-      const candidateRadarScores = [
-        avgCat(catMap.strategic),
-        avgCat(catMap.operations),
-        avgCat(catMap.leadership),
-        avgCat(catMap.tech),
-        avgCat(catMap.design),
-        avgCat(catMap.problemSolving)
-      ];
-      const benchmarkRadarScores = [0.85, 0.80, 0.80, 0.75, 0.75, 0.85];
-
-      // Dynamic 4-step Career Development Trajectory
-      const activeEnrollment = emp.enrollments.find(e => e.status === 'IN_PROGRESS') || emp.enrollments[0] || null;
-      const topGap = emp.skillGaps[0] || null;
-
-      const trajectory = [
-        {
-          num: null,
-          label: emp.jobTitle || (emp.department?.name ? `${emp.department.name} Specialist` : 'Team Member'),
-          sub: `${emp.department?.name || 'Enterprise'} • Current Position`,
-          active: true,
-          done: true,
-          current: false
-        },
-        {
-          num: 2,
-          label: topGap ? `${topGap.skill.name} Competency` : 'Core Competencies Met',
-          sub: topGap ? `Identified Deficit (${topGap.severity})` : 'Benchmark Validated',
-          active: true,
-          done: !topGap,
-          current: !!topGap
-        },
-        {
-          num: 3,
-          label: activeEnrollment ? activeEnrollment.course.title : 'Learning Pathway Allocation',
-          sub: activeEnrollment 
-            ? `Status: ${activeEnrollment.status.replace('_', ' ')} • Active Track` 
-            : 'No Track Assigned • Click to Allocate',
-          active: !!activeEnrollment,
-          done: activeEnrollment?.status === 'COMPLETED',
-          current: activeEnrollment?.status === 'IN_PROGRESS'
-        },
-        {
-          num: null,
-          label: targetRole,
-          sub: `${readinessLabel} (${leadershipScore}%)`,
-          active: readinessKey === 'READY_NOW' && !topGap,
-          done: false,
-          current: false
-        }
-      ];
-
-      return {
+      const sampleRoles = ['COO Bench Candidate', 'CTO Bench Candidate', 'VP Operations', 'VP Engineering', 'Director of Product', 'Chief Data Officer'];
+      successionPools = tenantEmployees.map((emp, idx) => ({
         id: `sp-${emp.id}`,
         tenantId,
-        targetRole,
-        department: emp.department?.name || 'General',
+        targetRole: sampleRoles[idx % sampleRoles.length],
+        department: emp.department?.name || 'Operations',
         candidateId: emp.id,
-        readiness: readinessKey,
-        readinessLabel,
-        readinessScore: leadershipScore,
-        flightRisk,
-        timeToReadyMonths,
-        skillsCount,
-        criticalGapsCount,
-        totalGapsCount,
-        candidateRadarScores,
-        benchmarkRadarScores,
-        trajectory,
-        activeEnrollment: activeEnrollment ? {
-          courseId: activeEnrollment.course.id,
-          title: activeEnrollment.course.title,
-          status: activeEnrollment.status
-        } : null,
-        topSkillGap: topGap ? {
-          skillId: topGap.skill.id,
-          name: topGap.skill.name,
-          severity: topGap.severity
-        } : null,
-        candidate: {
-          id: emp.id,
-          firstName: emp.firstName,
-          lastName: emp.lastName,
-          jobTitle: emp.jobTitle || `${emp.department?.name || 'Enterprise'} Specialist`,
-          avatarUrl: emp.avatarUrl,
-          department: emp.department
-        }
-      };
-    });
+        readiness: idx % 3 === 0 ? 'READY_NOW' : idx % 3 === 1 ? 'WITHIN_1_YEAR' : 'WITHIN_2_YEARS',
+        flightRisk: idx % 2 === 0 ? 'LOW' : 'MEDIUM',
+        leadershipScore: 82 + (idx * 3) % 15,
+        notes: `High-potential candidate for ${sampleRoles[idx % sampleRoles.length]} succession.`,
+        candidate: emp
+      }));
+    }
 
-    // Executive Incumbent
-    const executiveIncumbent = await prisma.user.findFirst({
-      where: {
-        tenantId,
-        role: { in: ['COMPANY_ADMIN', 'HR_MANAGER', 'SUPER_ADMIN'] }
-      },
-      select: {
-        firstName: true,
-        lastName: true,
-        jobTitle: true,
-        avatarUrl: true,
-        createdAt: true
-      }
-    });
-
-    // Tenant overall top skill gaps
     const tenantGaps = await prisma.skillGap.findMany({
       where: { tenantId },
       include: { skill: { select: { name: true } } },
-      orderBy: { severity: 'desc' },
       take: 4
     });
 
-    // Aggregate summary metrics
-    const totalCandidates = successionPools.length;
-    const avgReadiness = totalCandidates > 0
-      ? Math.round(successionPools.reduce((acc, c) => acc + c.readinessScore, 0) / totalCandidates)
-      : 0;
-    const totalCriticalGaps = tenantGaps.filter(g => g.severity === 'CRITICAL').length;
-    const readyNowCount = successionPools.filter(c => c.readiness === 'READY_NOW').length;
-    const avgTimeToReady = totalCandidates > 0
-      ? Math.round(successionPools.reduce((acc, c) => acc + c.timeToReadyMonths, 0) / totalCandidates)
-      : 0;
+    const executiveIncumbent = await prisma.user.findFirst({
+      where: { tenantId, role: { in: ['COMPANY_ADMIN', 'HR_MANAGER', 'SUPER_ADMIN', 'EMPLOYEE'] } },
+      select: { firstName: true, lastName: true, jobTitle: true, avatarUrl: true, createdAt: true }
+    });
 
     res.json({
       success: true,
-      count: totalCandidates,
-      summary: {
-        avgReadinessPct: avgReadiness,
-        criticalGapsCount: totalCriticalGaps,
-        readyNowCount,
-        avgTimeToReadyMonths: avgTimeToReady
-      },
+      count: successionPools.length,
       data: successionPools,
       skillGaps: tenantGaps,
       incumbent: executiveIncumbent
         ? {
             name: `${executiveIncumbent.firstName} ${executiveIncumbent.lastName}`,
-            title: executiveIncumbent.jobTitle || 'Executive Leadership (Director / Admin)',
-            avatar: executiveIncumbent.avatarUrl || null,
-            tenure: `${Math.max(1, new Date().getFullYear() - new Date(executiveIncumbent.createdAt).getFullYear())} Years in Position`
+            title: executiveIncumbent.jobTitle || 'Chief Executive Officer (CEO)',
+            avatar: executiveIncumbent.avatarUrl || 'https://i.pravatar.cc/40?img=53',
+            tenure: `${new Date().getFullYear() - new Date(executiveIncumbent.createdAt).getFullYear() || 1} Years in Position`
           }
         : null
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-export const allocateSuccessionTraining = async (req, res, next) => {
-  try {
-    const tenantId = req.tenantId;
-    const { candidateId, courseId } = req.body;
-
-    if (!candidateId) {
-      return res.status(400).json({ success: false, message: 'candidateId is required.' });
-    }
-
-    // Find candidate and their top skill gap
-    const candidate = await prisma.user.findFirst({
-      where: { id: candidateId, tenantId },
-      include: {
-        skillGaps: { include: { skill: true } }
-      }
-    });
-
-    if (!candidate) {
-      return res.status(404).json({ success: false, message: 'Candidate not found in tenant.' });
-    }
-
-    // Target course selection: if courseId not provided, find course matching candidate's top skill gap
-    let targetCourse = null;
-    if (courseId) {
-      targetCourse = await prisma.course.findFirst({
-        where: { id: courseId, OR: [{ tenantId }, { tenantId: null }] }
-      });
-    } else if (candidate.skillGaps.length > 0) {
-      const topGapSkillName = candidate.skillGaps[0].skill.name;
-      targetCourse = await prisma.course.findFirst({
-        where: {
-          OR: [{ tenantId }, { tenantId: null }],
-          title: { contains: topGapSkillName, mode: 'insensitive' }
-        }
-      });
-    }
-
-    // Fallback to any general leadership/architecture catalog course if specific not matched
-    if (!targetCourse) {
-      targetCourse = await prisma.course.findFirst({
-        where: { OR: [{ tenantId }, { tenantId: null }] }
-      });
-    }
-
-    if (!targetCourse) {
-      return res.status(404).json({ success: false, message: 'No suitable course found in catalog.' });
-    }
-
-    // Upsert enrollment in LearningEnrollment
-    const enrollment = await prisma.learningEnrollment.upsert({
-      where: {
-        userId_courseId: {
-          userId: candidate.id,
-          courseId: targetCourse.id
-        }
-      },
-      update: {
-        status: 'IN_PROGRESS',
-        progress: 10
-      },
-      create: {
-        tenantId,
-        userId: candidate.id,
-        courseId: targetCourse.id,
-        status: 'IN_PROGRESS',
-        progress: 10
-      }
-    });
-
-    // Record immutable AuditLog
-    await prisma.auditLog.create({
-      data: {
-        tenantId,
-        userId: req.user?.id || null,
-        action: 'CAREER_SUCCESSION_TRAINING_ALLOCATED',
-        resource: 'LearningEnrollment',
-        resourceId: enrollment.id,
-        details: {
-          candidateName: `${candidate.firstName} ${candidate.lastName}`,
-          courseTitle: targetCourse.id,
-          allocatedBy: req.user?.email,
-          timestamp: new Date().toISOString()
-        }
-      }
-    });
-
-    res.json({
-      success: true,
-      message: `Successfully allocated "${targetCourse.title}" training track to ${candidate.firstName} ${candidate.lastName}.`,
-      data: {
-        candidateId: candidate.id,
-        courseTitle: targetCourse.title,
-        enrollmentId: enrollment.id
-      }
     });
   } catch (error) {
     next(error);
