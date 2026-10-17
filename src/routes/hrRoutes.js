@@ -2,6 +2,9 @@ import express from 'express';
 import {
   getOrganizationSkillAnalytics,
   getWorkforceForecast,
+  reallocateHeadcount,
+  syncRecruitment,
+  approveHiringPlan,
   getSuccessionPipelines,
   getComplianceStatus,
   getTrainingPrograms,
@@ -23,6 +26,9 @@ router.use(requireRole('HR_MANAGER', 'COMPANY_ADMIN', 'SUPER_ADMIN'));
 
 router.get('/analytics', getOrganizationSkillAnalytics);
 router.get('/forecast', getWorkforceForecast);
+router.post('/reallocate-headcount', reallocateHeadcount);
+router.post('/sync-recruitment', syncRecruitment);
+router.post('/approve-hiring-plan', approveHiringPlan);
 router.get('/succession', getSuccessionPipelines);
 router.get('/compliance', getComplianceStatus);
 router.get('/training', getTrainingPrograms);
