@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import os from 'os';
 import prisma from '../config/db.js';
+import { validatePasswordPolicy } from '../utils/securityPolicies.js';
 
 export const createUser = async (req, res, next) => {
   try {
@@ -58,6 +59,10 @@ export const createUser = async (req, res, next) => {
         });
         departmentId = newDept.id;
       }
+    // Validate password complexity according to tenant security policy
+    const pwdErr = await validatePasswordPolicy(password, tenantId);
+    if (pwdErr) {
+      return res.status(400).json({ success: false, message: pwdErr });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -699,7 +704,19 @@ export const getAuditLogs = async (req, res, next) => {
   try {
     const isSuper = req.user?.role === 'SUPER_ADMIN';
     const tenantId = isSuper ? req.query.tenantId : req.tenantId;
-    const whereClause = tenantId ? { tenantId } : {};
+    let whereClause = tenantId ? { tenantId } : {};
+
+    // Enforce audit log retention policy window if configured for tenant
+    if (tenantId) {
+      const retentionParam = await prisma.systemParameter.findUnique({
+        where: { tenantId_key: { tenantId, key: 'auditLogRetentionDays' } }
+      });
+      const days = retentionParam ? parseInt(retentionParam.value) : 90;
+      if (!isNaN(days) && days > 0) {
+        const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        whereClause.createdAt = { gte: cutoffDate };
+      }
+    }
 
     const [totalCount, logs] = await Promise.all([
       prisma.auditLog.count({ where: whereClause }),
@@ -1046,16 +1063,22 @@ export const updateAIConfig = async (req, res, next) => {
 export const getSecurityPolicies = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
+    let auditLogCount = 0;
+    if (tenantId) {
+      auditLogCount = await prisma.auditLog.count({ where: { tenantId } });
+    }
+
     if (!tenantId) {
       return res.json({
         success: true,
+        auditLogCount: 0,
         data: {
-          ssoEnforced: true,
-          mfaRequirement: 'all',
+          ssoEnforced: false,
+          mfaRequirement: 'optional',
           sessionTimeout: '60',
           ipWhitelistingEnabled: false,
-          whitelistedIPs: '192.168.1.1/24, 10.0.0.1',
-          passwordMinLength: 12,
+          whitelistedIPs: '',
+          passwordMinLength: 8,
           requireSpecialChar: true,
           auditLogRetentionDays: 90
         }
@@ -1073,13 +1096,14 @@ export const getSecurityPolicies = async (req, res, next) => {
 
     res.json({
       success: true,
+      auditLogCount,
       data: {
-        ssoEnforced: paramMap.ssoEnforced !== undefined ? paramMap.ssoEnforced === 'true' : true,
-        mfaRequirement: paramMap.mfaRequirement || 'all',
+        ssoEnforced: paramMap.ssoEnforced !== undefined ? paramMap.ssoEnforced === 'true' : false,
+        mfaRequirement: paramMap.mfaRequirement || 'optional',
         sessionTimeout: paramMap.sessionTimeout || '60',
         ipWhitelistingEnabled: paramMap.ipWhitelistingEnabled === 'true',
-        whitelistedIPs: paramMap.whitelistedIPs || '192.168.1.1/24, 10.0.0.1',
-        passwordMinLength: parseInt(paramMap.passwordMinLength || '12'),
+        whitelistedIPs: paramMap.whitelistedIPs || '',
+        passwordMinLength: parseInt(paramMap.passwordMinLength || '8'),
         requireSpecialChar: paramMap.requireSpecialChar !== undefined ? paramMap.requireSpecialChar === 'true' : true,
         auditLogRetentionDays: parseInt(paramMap.auditLogRetentionDays || '90')
       }

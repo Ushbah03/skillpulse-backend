@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import prisma from '../config/db.js';
 import { sendEmail } from '../utils/sendEmail.js';
+import { getTenantSecurityPolicies, validatePasswordPolicy, checkIpWhitelisting } from '../utils/securityPolicies.js';
 
 export const login = async (req, res, next) => {
   try {
@@ -67,6 +68,39 @@ export const login = async (req, res, next) => {
     }
 
     // Note: Suspended tenant check is handled gracefully by frontend redirect to /workspace-suspended page and protected route guard.
+    let sessionExpiry = process.env.JWT_EXPIRES_IN || '7d';
+
+    // Enforce Tenant Security & Access Policies
+    if (user.tenantId && user.role !== 'SUPER_ADMIN') {
+      const tenantPolicies = await getTenantSecurityPolicies(user.tenantId);
+      if (tenantPolicies) {
+        // 1. Mandatory Single Sign-On (SSO) Enforcement
+        if (tenantPolicies.ssoEnforced) {
+          return res.status(403).json({
+            success: false,
+            isSsoEnforced: true,
+            message: 'Mandatory Single Sign-On (SSO) is enforced for your organization. Please sign in using your company SSO provider.'
+          });
+        }
+
+        // 2. IP Whitelisting Enforcement
+        if (tenantPolicies.ipWhitelistingEnabled && tenantPolicies.whitelistedIPs) {
+          const rawIp = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || '').toString();
+          if (!checkIpWhitelisting(rawIp, tenantPolicies.whitelistedIPs)) {
+            const cleanIp = rawIp.split(',')[0].trim().replace(/^::ffff:/, '');
+            return res.status(403).json({
+              success: false,
+              message: `Access denied: Login attempted from an unauthorized IP address (${cleanIp || 'Unknown'}) according to your organization's security policy.`
+            });
+          }
+        }
+
+        // 3. Dynamic Session Timeout
+        if (tenantPolicies.sessionTimeout) {
+          sessionExpiry = `${tenantPolicies.sessionTimeout}m`;
+        }
+      }
+    }
 
     const token = jwt.sign(
       {
@@ -76,7 +110,7 @@ export const login = async (req, res, next) => {
         email: user.email
       },
       process.env.JWT_SECRET || 'skillpulse_ai_super_secret_enterprise_jwt_key_2026',
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+      { expiresIn: sessionExpiry }
     );
 
     // Record login in audit log
@@ -177,6 +211,12 @@ export const register = async (req, res, next) => {
 
     if (existingUser) {
       return res.status(409).json({ success: false, message: 'This email is already registered in the system. You cannot create another account with it.' });
+    }
+
+    // Validate password complexity according to organization security policy
+    const pwdErr = await validatePasswordPolicy(password, tenant.id);
+    if (pwdErr) {
+      return res.status(400).json({ success: false, message: pwdErr });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -368,6 +408,12 @@ export const resetPassword = async (req, res, next) => {
 
     if (user.resetTokenExpiry && new Date() > new Date(user.resetTokenExpiry)) {
       return res.status(400).json({ success: false, message: 'Password reset token has expired. Please request a new link.' });
+    }
+
+    // Validate password complexity according to organization security policy
+    const pwdErr = await validatePasswordPolicy(newPassword, user.tenantId);
+    if (pwdErr) {
+      return res.status(400).json({ success: false, message: pwdErr });
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
