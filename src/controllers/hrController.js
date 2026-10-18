@@ -362,7 +362,13 @@ export const getWorkforceForecast = async (req, res, next) => {
       where: { tenantId },
       include: { 
         skill: true, 
-        user: { include: { department: true } } 
+        assignedCourse: true,
+        user: { 
+          include: { 
+            department: true,
+            skills: true 
+          } 
+        } 
       }
     });
     const activeGaps = skillGaps.length;
@@ -559,20 +565,24 @@ export const getWorkforceForecast = async (req, res, next) => {
       const matchedCourse = gap.assignedCourse || findCourseForSkill(sId, sName);
       const primaryCandidate = gap.user;
 
-      const avgProf = (primaryCandidate?.skills || []).length > 0
-        ? (primaryCandidate.skills.reduce((sum, s) => sum + (s.proficiencyLevel || 0), 0) / primaryCandidate.skills.length)
-        : 3.2;
+      const candSkills = primaryCandidate?.skills || [];
+      const candAvgProf = candSkills.length > 0
+        ? (candSkills.reduce((sum, s) => sum + (s.proficiencyLevel || 0), 0) / candSkills.length)
+        : (gap.currentLevel || 2.5);
 
-      const matchScore = Math.round((avgProf / 5.0) * 100);
+      const baseAptitude = (candAvgProf / 5.0) * 100;
+      // Real database competency foundation bonus: -4% to +4% based on current level (1 to 3 out of 4.5)
+      const foundationBonus = (((gap.currentLevel || 1) - 1.5) / 3.0) * 8;
+      const matchScore = Math.min(98, Math.max(55, Math.round(baseAptitude + foundationBonus)));
 
       internalTalentRecommendations.push({
         id: `rec_${gap.id}`,
         gapId: gap.id,
         skillId: sId,
         skillName: sName,
-        department: primaryCandidate?.department?.name || 'Product Design',
+        department: primaryCandidate?.department?.name || 'General',
         severity: gap.severity || 'CRITICAL',
-        targetRole: primaryCandidate?.jobTitle || 'Team Specialist',
+        targetRole: primaryCandidate?.jobTitle || 'Employee',
         recommendedCandidate: {
           id: primaryCandidate?.id,
           name: `${primaryCandidate?.firstName || 'Team'} ${primaryCandidate?.lastName || 'Member'}`.trim(),
