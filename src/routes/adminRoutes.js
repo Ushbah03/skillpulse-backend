@@ -4,6 +4,7 @@ import {
   createTenant,
   updateTenant,
   getUsers,
+  getDepartments,
   createUser,
   updateUserRole,
   deleteUser,
@@ -40,6 +41,7 @@ router.patch('/tenants/:id', requireRole('SUPER_ADMIN'), updateTenant);
 router.get('/global-telemetry', requireRole('SUPER_ADMIN'), getGlobalTelemetry);
 router.get('/dashboard', getDashboardStats);
 router.get('/users', getUsers);
+router.get('/departments', getDepartments);
 router.post('/users', createUser);
 router.patch('/users/:userId', updateUserRole);
 router.delete('/users/:userId', deleteUser);

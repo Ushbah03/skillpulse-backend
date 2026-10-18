@@ -281,6 +281,34 @@ export const getUsers = async (req, res, next) => {
   }
 };
 
+export const getDepartments = async (req, res, next) => {
+  try {
+    const whereClause = {};
+    if (req.user.role !== 'SUPER_ADMIN') {
+      whereClause.tenantId = req.tenantId;
+    } else if (req.query.tenantId && req.query.tenantId !== 'ALL') {
+      whereClause.tenantId = req.query.tenantId;
+    }
+
+    const departments = await prisma.department.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        name: true,
+        tenantId: true,
+        _count: {
+          select: { members: true, teams: true }
+        }
+      },
+      orderBy: { name: 'asc' }
+    });
+
+    res.json({ success: true, count: departments.length, data: departments });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const updateUserRole = async (req, res, next) => {
   try {
     const { userId } = req.params;
