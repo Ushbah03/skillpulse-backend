@@ -236,7 +236,18 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
           department: { select: { name: true } },
           skills: { include: { skill: true } },
           skillGaps: { include: { skill: true } },
-          enrollments: { include: { course: true } }
+          enrollments: { include: { course: true } },
+          assessments: {
+            select: {
+              id: true,
+              title: true,
+              category: true,
+              score: true,
+              totalQuestions: true,
+              correctAnswers: true,
+              createdAt: true
+            }
+          }
         }
       })
     };
