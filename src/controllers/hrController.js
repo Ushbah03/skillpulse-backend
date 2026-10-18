@@ -376,7 +376,13 @@ export const getWorkforceForecast = async (req, res, next) => {
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const now = new Date();
     const growthTrends = [];
-    const gapsDemandBuffer = activeGaps;
+
+    // Real target benchmark dynamically calculated from requiredLevel of active skill gaps in DB
+    const avgTargetLevel = skillGaps.length 
+      ? (skillGaps.reduce((sum, g) => sum + (g.requiredLevel || 4.5), 0) / skillGaps.length)
+      : (avgProficiency > 0 ? Math.min(5.0, avgProficiency + 0.5) : 4.5);
+    const targetBenchmark = Math.round((avgTargetLevel / 5.0) * 100);
+    const projectedNeed = totalEmployees + activeGaps;
 
     // Past 6 months historical capability trend based on actual skill verification timestamps
     for (let i = 5; i >= 0; i--) {
@@ -389,37 +395,35 @@ export const getWorkforceForecast = async (req, res, next) => {
         ? Math.round(((skillsUpTo.reduce((sum, s) => sum + (s.proficiencyLevel || 0), 0) / skillsUpTo.length) / 5.0) * 100)
         : 0;
       
-      const targetBenchmark = 95;
       const historicalUsers = users.filter(u => u.createdAt && new Date(u.createdAt) <= dEnd).length;
+      const monthTarget = historicalUsers > 0 ? targetBenchmark : 0;
+      const monthDemand = historicalUsers > 0 ? historicalUsers + (capPct < targetBenchmark ? activeGaps : 0) : 0;
 
       growthTrends.push({
         month: mName,
         current: capPct,
         currentSupply: historicalUsers,
-        predicted: targetBenchmark,
-        futureDemand: historicalUsers + activeGaps,
+        predicted: monthTarget,
+        futureDemand: monthDemand,
         isForecast: false
       });
     }
 
     // Next 6 months projected capability progression as active courses complete
-    const baseCap = readinessPct || 84;
+    const baseCap = readinessPct;
     for (let j = 1; j <= 6; j++) {
       const d = new Date(now.getFullYear(), now.getMonth() + j, 1);
       const mName = monthNames[d.getMonth()];
       
-      // With active courseware assigned, capability projects toward 98%
-      const projectedCap = Math.min(98, Math.round(baseCap + ((96 - baseCap) * (j / 6))));
-      const targetBenchmark = 95;
-      const projectedSupply = totalEmployees + Math.floor(j / 2);
-      const projectedDemand = totalEmployees + gapsDemandBuffer + Math.floor(j / 2);
+      // Progression toward required target benchmark as assigned upskilling courses complete
+      const projectedCap = Math.round(baseCap + ((targetBenchmark - baseCap) * (j / 6)));
 
       growthTrends.push({
         month: mName,
         current: projectedCap,
-        currentSupply: projectedSupply,
+        currentSupply: totalEmployees,
         predicted: targetBenchmark,
-        futureDemand: projectedDemand,
+        futureDemand: projectedNeed,
         isForecast: true
       });
     }
@@ -487,7 +491,6 @@ export const getWorkforceForecast = async (req, res, next) => {
     })).sort((a, b) => b.count - a.count);
 
     const totalFlightRisk = departmentAttrition.reduce((sum, d) => sum + (d.atRiskCount || 0), 0);
-    const projectedNeed = totalEmployees + activeGaps;
 
     // 6. Dynamic Prescriptive AI Insight (Pareto Deficit Bottleneck Detection)
     let aiInsight = '';
@@ -560,7 +563,7 @@ export const getWorkforceForecast = async (req, res, next) => {
         ? (primaryCandidate.skills.reduce((sum, s) => sum + (s.proficiencyLevel || 0), 0) / primaryCandidate.skills.length)
         : 3.2;
 
-      const matchScore = Math.min(96, Math.max(72, Math.round(75 + (avgProf * 4.5))));
+      const matchScore = Math.round((avgProf / 5.0) * 100);
 
       internalTalentRecommendations.push({
         id: `rec_${gap.id}`,
@@ -579,7 +582,7 @@ export const getWorkforceForecast = async (req, res, next) => {
           department: primaryCandidate?.department?.name || 'General'
         },
         matchScore: `${matchScore}%`,
-        readinessLevel: matchScore >= 85 ? 'High Readiness' : 'Moderate Readiness',
+        readinessLevel: matchScore >= 80 ? 'High Readiness' : 'Moderate Readiness',
         fulfillmentType: 'Internal Upskilling Track',
         courseId: matchedCourse?.id || null,
         courseTitle: matchedCourse?.title || `${sName} Mastery Program`,
@@ -587,6 +590,9 @@ export const getWorkforceForecast = async (req, res, next) => {
         isAlreadyEnrolled: !!gap.assignedCourseId
       });
     }
+
+    const deltaBenchmark = targetBenchmark - readinessPct;
+    const readinessTrend = deltaBenchmark > 0 ? `+${deltaBenchmark}% to Target` : 'Target Achieved';
 
     const forecast = {
       totalEmployees,
@@ -596,7 +602,8 @@ export const getWorkforceForecast = async (req, res, next) => {
       flightRiskCount: totalFlightRisk,
       avgReadiness,
       readinessPct,
-      readinessTrend: '+12.0%',
+      targetBenchmark,
+      readinessTrend,
       trainingCoverageRate: trainingCoveragePct,
       growthTrends,
       departmentAttrition,
