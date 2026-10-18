@@ -33,9 +33,13 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       }
     });
 
-    // Compute live average readiness from user skills
+    // Compute live average readiness from user skills with relations
     const userSkills = await prisma.userSkill.findMany({
-      where: { user: { tenantId } }
+      where: { user: { tenantId } },
+      include: {
+        skill: { include: { category: true } },
+        user: { include: { department: true } }
+      }
     });
     const totalProficiency = userSkills.reduce((acc, us) => acc + (us.proficiencyLevel || 0), 0);
     const avgProficiencyVal = userSkills.length ? (totalProficiency / userSkills.length) : 0;
@@ -156,38 +160,58 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       });
     }
 
-    // 1. Assessment Milestone Progression (Real chronological progression of skills evaluated)
-    const sortedSkills = [...userSkills].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    const milestones = [
-      { key: '2026-09-03', label: 'Sep 03', title: 'Diagnostic Baseline' },
-      { key: '2026-09-19', label: 'Sep 19', title: 'Core Soft Skills' },
-      { key: '2026-09-25', label: 'Sep 25', title: 'Mid-Cycle Audit' },
-      { key: '2026-09-27', label: 'Sep 27', title: 'Development Cohort' },
-      { key: '2026-09-30', label: 'Sep 30', title: 'Marketing & Design' },
-      { key: 'current', label: 'Oct Baseline', title: 'Verified Benchmark' }
-    ];
-
-    const assessmentMilestoneTrend = milestones.map(m => {
-      let filtered = [];
-      if (m.key === 'current') {
-        filtered = sortedSkills;
-      } else {
-        const threshold = new Date(`${m.key}T23:59:59.999Z`);
-        filtered = sortedSkills.filter(s => new Date(s.createdAt) <= threshold);
+    // 1. Department Capability & Performance Benchmark (Live grouping by active departments)
+    const deptMap = {};
+    userSkills.forEach(us => {
+      const dName = us.user?.department?.name || 'General Operations';
+      if (!deptMap[dName]) {
+        deptMap[dName] = { name: dName, sum: 0, count: 0, userIds: new Set() };
       }
-      const sum = filtered.reduce((acc, s) => acc + (s.proficiencyLevel || 0), 0);
-      const avg = filtered.length ? (sum / filtered.length) : (avgProficiencyVal || 4.2);
-      const pct = Math.round((avg / 5.0) * 100);
-      return {
-        milestone: m.label,
-        title: m.title,
-        value: pct,
-        score: parseFloat(avg.toFixed(1)),
-        skillsCount: filtered.length
-      };
+      deptMap[dName].sum += (us.proficiencyLevel || 0);
+      deptMap[dName].count += 1;
+      if (us.userId) deptMap[dName].userIds.add(us.userId);
     });
 
-    // 2. Competency Pillar Readiness Index (Direct live capability by functional pillar)
+    const departmentReadiness = Object.values(deptMap).map(d => {
+      const avg = d.count > 0 ? (d.sum / d.count) : 0;
+      const pct = Math.round((avg / 5.0) * 100);
+      return {
+        department: d.name,
+        name: d.name,
+        membersCount: d.userIds.size,
+        skillsCount: d.count,
+        score: parseFloat(avg.toFixed(1)),
+        value: pct,
+        benchmark: 90,
+        deficit: Math.max(0, 90 - pct)
+      };
+    }).sort((a, b) => b.value - a.value);
+
+    // 2. Skill Taxonomy Category Readiness (From official database SkillCategory table)
+    const categoryMap = {};
+    userSkills.forEach(us => {
+      const catName = us.skill?.category?.name || 'Technical';
+      if (!categoryMap[catName]) {
+        categoryMap[catName] = { name: catName, sum: 0, count: 0 };
+      }
+      categoryMap[catName].sum += (us.proficiencyLevel || 0);
+      categoryMap[catName].count += 1;
+    });
+
+    const categoryReadiness = Object.values(categoryMap).map(c => {
+      const avg = c.count > 0 ? (c.sum / c.count) : 0;
+      const pct = Math.round((avg / 5.0) * 100);
+      return {
+        category: c.name,
+        fullName: c.name,
+        skillsCount: c.count,
+        score: parseFloat(avg.toFixed(1)),
+        value: pct,
+        benchmark: 90
+      };
+    }).sort((a, b) => b.value - a.value);
+
+    // 3. Competency Pillar Readiness Index (Direct live capability by functional pillar)
     const pillarReadinessTrend = competencyPillars.map(p => {
       const matching = userSkills.filter(s => {
         const sName = (s.skill?.name || '').toLowerCase();
@@ -202,9 +226,20 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
         fullName: p.name,
         value: pct,
         score: parseFloat(avg.toFixed(1)),
-        skillsCount: matching.length
+        skillsCount: matching.length,
+        benchmark: 90
       };
     });
+
+    // 4. Department Performance Trend for charts (Chronological or comparative)
+    const assessmentMilestoneTrend = departmentReadiness.map(d => ({
+      milestone: d.name,
+      title: `${d.name} Capability Benchmark`,
+      value: d.value,
+      score: d.score,
+      skillsCount: d.skillsCount,
+      membersCount: d.membersCount
+    }));
 
     // Dynamic AI Prescriptive Insight
     const gapsByCategory = {};
@@ -272,6 +307,8 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       monthlyPerformanceTrend,
       assessmentMilestoneTrend,
       pillarReadinessTrend,
+      departmentReadiness,
+      categoryReadiness,
       heatmapColumns: competencyPillars.map(p => p.name.toUpperCase()),
       departments: departments.map(d => {
         let totalMemberSkills = 0;
