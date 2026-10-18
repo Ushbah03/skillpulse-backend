@@ -9,8 +9,10 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       include: {
         members: {
           include: {
-            skills: { include: { skill: true } },
-            skillGaps: true
+            skills: { include: { skill: { include: { category: true } } } },
+            skillGaps: true,
+            enrollments: true,
+            assessments: true
           }
         }
       }
@@ -130,11 +132,12 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
 
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
       const mName = monthNames[d.getMonth()];
       const countUpToMonth = rawGaps.filter(g => new Date(g.createdAt) <= endOfMonth).length;
       gapTrend.push({
         month: mName,
+        endDate: endOfMonth,
         gaps: countUpToMonth,
         target: Math.max(0, Math.round(countUpToMonth * 0.3))
       });
@@ -160,6 +163,34 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       aiInsightText = `All verified employee competencies comply with target operational readiness benchmarks across active departments.`;
     }
 
+    // Cross-departmental synergy & upskilling insight
+    const deptsWithSkills = departments.filter(d => d.members.some(m => m.skills.length > 0));
+    let deptInsight = {
+      title: 'Cross-Departmental Skill Synergy & Readiness',
+      summary: ''
+    };
+    if (deptsWithSkills.length > 0) {
+      const topDept = [...deptsWithSkills].sort((a, b) => {
+        const aSkills = a.members.flatMap(m => m.skills);
+        const bSkills = b.members.flatMap(m => m.skills);
+        const aAvg = aSkills.length ? aSkills.reduce((s, k) => s + (k.proficiencyLevel || 0), 0) / aSkills.length : 0;
+        const bAvg = bSkills.length ? bSkills.reduce((s, k) => s + (k.proficiencyLevel || 0), 0) / bSkills.length : 0;
+        return bAvg - aAvg;
+      })[0];
+      const deptWithMostGaps = [...departments].sort((a, b) => {
+        const aGaps = a.members.flatMap(m => m.skillGaps).length;
+        const bGaps = b.members.flatMap(m => m.skillGaps).length;
+        return bGaps - aGaps;
+      })[0];
+      const topDeptSkills = topDept.members.flatMap(m => m.skills);
+      const topDeptAvg = (topDeptSkills.reduce((s, k) => s + (k.proficiencyLevel || 0), 0) / topDeptSkills.length).toFixed(1);
+      const gapCount = deptWithMostGaps.members.flatMap(m => m.skillGaps).length;
+
+      deptInsight.summary = `${topDept.name} leads organizational proficiency at ${topDeptAvg} / 5.0 across verified capabilities. ${deptWithMostGaps.name} holds ${gapCount} active capability development requirement${gapCount > 1 ? 's' : ''} mapped to training programs. Prioritize accelerating course completion in ${deptWithMostGaps.name} to balance operational readiness.`;
+    } else {
+      deptInsight.summary = 'Baseline skill profiling is underway. Employee assessments and self-ratings will feed cross-departmental readiness analytics.';
+    }
+
     const analytics = {
       totalEmployees: totalEmployeesCount,
       criticalGapsCount,
@@ -169,6 +200,7 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       averageReadiness,
       complianceRate: `${complianceRateVal}%`,
       aiInsight: aiInsightText,
+      deptInsight,
       gapTrend,
       heatmapColumns: competencyPillars.map(p => p.name.toUpperCase()),
       departments: departments.map(d => {
@@ -208,6 +240,42 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
             : 0.0;
         });
 
+        const allEnrollments = d.members.flatMap(m => m.enrollments || []);
+        const totalEnrollments = allEnrollments.length;
+        const avgEnrollmentProgress = totalEnrollments > 0
+          ? Math.round(allEnrollments.reduce((sum, e) => sum + Math.max(0, e.progressPct || 0), 0) / totalEnrollments)
+          : 0;
+        const completedEnrollmentsCount = allEnrollments.filter(e => e.status === 'COMPLETED' || e.progressPct >= 100).length;
+
+        const allAssessments = d.members.flatMap(m => m.assessments || []);
+        const totalAssessments = allAssessments.length;
+        const avgAssessmentScore = totalAssessments > 0
+          ? Math.round(allAssessments.reduce((sum, a) => sum + (a.score || 0), 0) / totalAssessments)
+          : null;
+
+        let performanceScore = 0;
+        if (hasSkills && avgAssessmentScore !== null) {
+          const skillPct = (avgProficiency / 5.0) * 100;
+          performanceScore = Math.round((skillPct * 0.6) + (avgAssessmentScore * 0.4));
+        } else if (hasSkills) {
+          performanceScore = Math.round((avgProficiency / 5.0) * 100);
+        } else if (avgAssessmentScore !== null) {
+          performanceScore = avgAssessmentScore;
+        } else {
+          performanceScore = 0;
+        }
+
+        const readinessPct = hasSkills ? Math.round((avgProficiency / 5.0) * 100) : 0;
+
+        const allMemberSkills = d.members.flatMap(m => m.skills || []);
+        const monthlyTrend = gapTrend.map(gt => {
+          const skillsUpTo = allMemberSkills.filter(s => new Date(s.createdAt) <= gt.endDate);
+          if (skillsUpTo.length === 0) return { month: gt.month, score: 0 };
+          const sum = skillsUpTo.reduce((acc, s) => acc + (s.proficiencyLevel || 0), 0);
+          const avg = sum / skillsUpTo.length;
+          return { month: gt.month, score: parseFloat(avg.toFixed(1)), pct: Math.round((avg / 5.0) * 100) };
+        });
+
         return {
           id: d.id,
           name: d.name,
@@ -215,7 +283,14 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
           avgProficiency,
           gapPct: deficiencyPct,
           hasSkills,
-          scores
+          scores,
+          trainingCompletion: avgEnrollmentProgress,
+          completedEnrollmentsCount,
+          totalEnrollments,
+          avgAssessmentScore,
+          performanceScore,
+          readinessPct,
+          monthlyTrend
         };
       }),
       categoryDistribution: categoryStats.map(c => ({
