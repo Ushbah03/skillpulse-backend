@@ -880,6 +880,15 @@ export const getTrainingPrograms = async (req, res, next) => {
         OR: [{ tenantId }, { tenantId: null }]
       },
       include: {
+        skillsTaught: {
+          include: {
+            skill: {
+              include: {
+                category: true
+              }
+            }
+          }
+        },
         enrollments: {
           where: { tenantId }
         }
@@ -909,10 +918,31 @@ export const getTrainingPrograms = async (req, res, next) => {
         ? Math.round(courseEnrollments.reduce((sum, e) => sum + e.progressPct, 0) / totalEnrolled)
         : (completed > 0 ? 100 : 0);
 
+      // Determine real domain category from skills taught or course metadata
+      let courseCategory = 'TECHNICAL';
+      if (c.isCompliance) {
+        courseCategory = 'COMPLIANCE';
+      } else if (c.skillsTaught && c.skillsTaught.length > 0) {
+        const skillCats = c.skillsTaught.map(st => st.skill?.category?.name?.toUpperCase() || '');
+        if (skillCats.some(sc => sc.includes('SOFT') || sc.includes('COMMUNICATION'))) courseCategory = 'SOFT SKILLS';
+        else if (skillCats.some(sc => sc.includes('LEADER') || sc.includes('MANAG'))) courseCategory = 'LEADERSHIP';
+        else if (skillCats.some(sc => sc.includes('OPERAT') || sc.includes('MARKET') || sc.includes('BUSINESS'))) courseCategory = 'OPERATIONS';
+        else if (skillCats.some(sc => sc.includes('DESIGN') || sc.includes('MOTION') || sc.includes('PRODUCT') || sc.includes('UI/UX'))) courseCategory = 'DESIGN';
+        else courseCategory = 'TECHNICAL';
+      } else {
+        const t = (c.title || '').toUpperCase();
+        if (t.includes('COMPLIANCE') || t.includes('SECURITY') || t.includes('ETHICS') || t.includes('GDPR')) courseCategory = 'COMPLIANCE';
+        else if (t.includes('LEADERSHIP') || t.includes('MANAGEMENT') || t.includes('EXECUTIVE')) courseCategory = 'LEADERSHIP';
+        else if (t.includes('COMMUNICATION') || t.includes('PROBLEM SOLVING') || t.includes('CRITICAL THINKING') || t.includes('SOFT')) courseCategory = 'SOFT SKILLS';
+        else if (t.includes('DESIGN') || t.includes('FIGMA') || t.includes('UI/UX') || t.includes('CANVA')) courseCategory = 'DESIGN';
+        else if (t.includes('MARKETING') || t.includes('OPERATIONS') || t.includes('BUSINESS')) courseCategory = 'OPERATIONS';
+        else courseCategory = 'TECHNICAL';
+      }
+
       return {
         id: c.id,
         title: c.title,
-        category: (c.isCompliance ? 'COMPLIANCE' : c.level || 'TECHNICAL').toUpperCase(),
+        category: courseCategory,
         enrolledCount: totalEnrolled,
         completionPct: avgProgress,
         level: c.level,
