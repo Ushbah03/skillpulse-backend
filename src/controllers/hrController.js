@@ -129,6 +129,7 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const now = new Date();
     const gapTrend = [];
+    const monthlyPerformanceTrend = [];
 
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -141,7 +142,26 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
         gaps: countUpToMonth,
         target: Math.max(0, Math.round(countUpToMonth * 0.3))
       });
+
+      const skillsUpToMonth = userSkills.filter(s => new Date(s.createdAt) <= endOfMonth);
+      let scorePct = 0;
+      if (skillsUpToMonth.length > 0) {
+        const sum = skillsUpToMonth.reduce((acc, s) => acc + (s.proficiencyLevel || 0), 0);
+        scorePct = Math.round(((sum / skillsUpToMonth.length) / 5.0) * 100);
+      }
+      monthlyPerformanceTrend.push({
+        month: mName,
+        value: scorePct,
+        count: skillsUpToMonth.length
+      });
     }
+
+    const quarterlyTrend = [
+      { quarter: 'Q1', value: 0 },
+      { quarter: 'Q2', value: 0 },
+      { quarter: 'Q3', value: averageReadiness },
+      { quarter: 'Q4', value: averageReadiness }
+    ];
 
     // Dynamic AI Prescriptive Insight
     const gapsByCategory = {};
@@ -198,14 +218,23 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
       unassignedCount: unassignedGaps.length,
       assignedCount: assignedGaps.length,
       averageReadiness,
+      avgProficiency: parseFloat(avgProficiencyVal.toFixed(1)),
+      totalUserSkillsCount: userSkills.length,
       complianceRate: `${complianceRateVal}%`,
+      complianceRecordsCount: complianceRecords.length,
+      compliantRecordsCount: compliantCount,
       aiInsight: aiInsightText,
       deptInsight,
       gapTrend,
+      monthlyPerformanceTrend,
+      quarterlyTrend,
       heatmapColumns: competencyPillars.map(p => p.name.toUpperCase()),
       departments: departments.map(d => {
         let totalMemberSkills = 0;
         let sumMemberProficiency = 0;
+        let expertCount = 0;
+        let proficientCount = 0;
+        let noviceCount = 0;
         const pillarSums = { cloudArch: [], softwareEng: [], productDesign: [], dataAi: [], softSkills: [], leadership: [] };
 
         d.members.forEach(member => {
@@ -215,6 +244,14 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
             const catName = (s.skill?.category?.name || '').toLowerCase();
             totalMemberSkills += 1;
             sumMemberProficiency += lvl;
+
+            if (lvl >= 4.2) {
+              expertCount++;
+            } else if (lvl >= 3.0) {
+              proficientCount++;
+            } else {
+              noviceCount++;
+            }
 
             competencyPillars.forEach(p => {
               if (p.match.test(sName) || p.match.test(catName)) {
@@ -228,6 +265,10 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
         const avgProficiency = hasSkills 
           ? parseFloat((sumMemberProficiency / totalMemberSkills).toFixed(1)) 
           : 0.0;
+
+        const expertPct = totalMemberSkills > 0 ? Math.round((expertCount / totalMemberSkills) * 100) : 0;
+        const proficientPct = totalMemberSkills > 0 ? Math.round((proficientCount / totalMemberSkills) * 100) : 0;
+        const novicePct = totalMemberSkills > 0 ? Math.max(0, 100 - expertPct - proficientPct) : 0;
 
         const deficiencyPct = hasSkills
           ? Math.max(0, 100 - Math.round((avgProficiency / 5.0) * 100))
@@ -281,6 +322,13 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
           name: d.name,
           memberCount: d.members.length,
           avgProficiency,
+          totalSkills: totalMemberSkills,
+          expertCount,
+          proficientCount,
+          noviceCount,
+          expertPct,
+          proficientPct,
+          novicePct,
           gapPct: deficiencyPct,
           hasSkills,
           scores,
