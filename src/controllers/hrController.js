@@ -338,7 +338,21 @@ export const getOrganizationSkillAnalytics = async (req, res, next) => {
           avgAssessmentScore,
           performanceScore,
           readinessPct,
-          monthlyTrend
+          monthlyTrend,
+          members: d.members.map(m => ({
+            id: m.id,
+            name: `${m.firstName || ''} ${m.lastName || ''}`.trim() || 'Employee',
+            jobTitle: m.jobTitle || 'Team Member',
+            avatarUrl: m.avatarUrl,
+            skillsCount: m.skills.length,
+            skills: m.skills.map(s => ({
+              id: s.id,
+              name: s.skill?.name || 'Skill',
+              proficiency: s.proficiencyLevel,
+              tier: (s.proficiencyLevel || 0) >= 4.2 ? 'Expert' : (s.proficiencyLevel || 0) >= 3.0 ? 'Proficient' : 'Novice'
+            })),
+            gapsCount: m.skillGaps.length
+          }))
         };
       }),
       categoryDistribution: categoryStats.map(c => ({
