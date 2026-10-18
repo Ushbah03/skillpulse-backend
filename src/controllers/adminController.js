@@ -1136,10 +1136,10 @@ export const getIntegrations = async (req, res, next) => {
     let whereClause = {};
     if (!isSuperAdmin) {
       whereClause = {
-        OR: [
-          { tenantId },
-          { type: { contains: 'GLOBAL' } }
-        ]
+        tenantId,
+        NOT: {
+          type: { contains: 'GLOBAL' }
+        }
       };
     } else if (tenantId && tenantId !== 'ALL') {
       whereClause = {
