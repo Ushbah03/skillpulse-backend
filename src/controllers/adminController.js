@@ -1135,9 +1135,19 @@ export const getIntegrations = async (req, res, next) => {
 
     let whereClause = {};
     if (!isSuperAdmin) {
-      whereClause = { tenantId };
-    } else if (tenantId) {
-      whereClause = { tenantId };
+      whereClause = {
+        OR: [
+          { tenantId },
+          { type: { contains: 'GLOBAL' } }
+        ]
+      };
+    } else if (tenantId && tenantId !== 'ALL') {
+      whereClause = {
+        OR: [
+          { tenantId },
+          { type: { contains: 'GLOBAL' } }
+        ]
+      };
     }
 
     // Find default tenant for seeding platform connectors if missing
@@ -1219,11 +1229,30 @@ export const getIntegrations = async (req, res, next) => {
       const typeUpper = (item.type || '').toUpperCase();
       const isPlatform = configJson.isPlatform || typeUpper.includes('STRIPE') || typeUpper.includes('GOOGLE') || item.name.toLowerCase().includes('stripe') || item.name.toLowerCase().includes('google');
 
+      let connectorType = 'api';
+      let iconColor = 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
+
+      if (typeUpper.includes('HRIS') || item.name.toLowerCase().includes('hris') || item.name.toLowerCase().includes('bamboo') || item.name.toLowerCase().includes('workday')) {
+        connectorType = 'hris';
+        iconColor = 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+      } else if (typeUpper.includes('LMS') || item.name.toLowerCase().includes('lms') || item.name.toLowerCase().includes('youtube') || item.name.toLowerCase().includes('coursera')) {
+        connectorType = 'lms';
+        iconColor = 'bg-purple-500/10 text-purple-400 border-purple-500/20';
+      } else if (typeUpper.includes('SSO') || typeUpper.includes('AUTH') || item.name.toLowerCase().includes('google') || item.name.toLowerCase().includes('okta')) {
+        connectorType = 'auth';
+        iconColor = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+      } else if (typeUpper.includes('PAYMENT') || typeUpper.includes('STRIPE') || item.name.toLowerCase().includes('stripe')) {
+        connectorType = 'payment';
+        iconColor = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+      }
+
       return {
         id: item.id,
         name: item.name,
-        category: configJson.category || (typeUpper.includes('HRIS') ? 'HRIS & HCM' : typeUpper.includes('LMS') ? 'LMS / Learning' : typeUpper.includes('SSO') || typeUpper.includes('AUTH') ? 'SSO & Identity' : 'Collaboration'),
-        type: isPlatform ? 'platform' : 'custom',
+        category: configJson.category || (connectorType === 'hris' ? 'HRIS & HCM' : connectorType === 'lms' ? 'LMS Catalog' : connectorType === 'auth' ? 'SSO & Identity' : connectorType === 'payment' ? 'Payment Gateway' : 'Custom API Webhook'),
+        type: connectorType,
+        isPlatform,
+        iconColor,
         status: item.status === 'ACTIVE' ? 'Connected' : 'Disconnected',
         lastSync: item.lastSyncAt ? new Date(item.lastSyncAt).toLocaleString() : 'Never',
         description: configJson.description || `Enterprise connection for ${item.name} synchronized with SkillPulse platform.`,
