@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import os from 'os';
 import prisma from '../config/db.js';
 import { validatePasswordPolicy } from '../utils/securityPolicies.js';
+import { generateAiCompletion } from '../services/aiService.js';
 
 export const createUser = async (req, res, next) => {
   try {
@@ -696,6 +697,122 @@ export const deleteSkill = async (req, res, next) => {
     }
 
     res.json({ success: true, message: `Skill '${existingSkill.name}' removed from taxonomy.`, data: { id } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * AI-Driven Taxonomy Auto-Synchronization & Keyword Enrichment
+ * Uses Groq LPU Cloud (Llama-3.3-70b-versatile) / Gemini to analyze skills,
+ * generate standardized semantic keywords, and calibrate benchmark scores.
+ */
+export const syncTaxonomyWithAI = async (req, res, next) => {
+  try {
+    const isSuper = req.user?.role === 'SUPER_ADMIN';
+    if (!isSuper) {
+      return res.status(403).json({ success: false, message: 'Access denied: Only Super Admins can run AI taxonomy synchronization.' });
+    }
+
+    // 1. Fetch skills from Neon PostgreSQL
+    const skills = await prisma.skill.findMany({
+      include: { category: true },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    if (skills.length === 0) {
+      return res.status(400).json({ success: false, message: 'No competency skills found in database to synchronize.' });
+    }
+
+    // 2. Select up to 25 skills per batch for LLM context optimization
+    const batch = skills.slice(0, 25).map(s => ({
+      id: s.id,
+      name: s.name,
+      category: s.category?.name || 'General Competency',
+      currentLevel: s.proficiencyLevel || 'Intermediate'
+    }));
+
+    const prompt = `You are SkillPulse AI, an expert workforce talent architect and taxonomy normalization engine adhering strictly to enterprise competency frameworks (O*NET and ESCO).
+Analyze the following list of corporate competencies and their domains:
+${JSON.stringify(batch, null, 2)}
+
+For each competency, perform:
+1. "tags": Exactly 3 to 5 standardized, comma-separated lowercase technical/domain keywords without '#' symbols (e.g. "containers, kubernetes, devops, cloud-native").
+2. "priorityTier": Calibrated industry urgency tier based on market demand ("Low" | "Medium" | "High" | "Critical").
+3. "benchmarkScore": Recommended minimum proficiency benchmark score percentage (integer between 70 and 90).
+
+Return ONLY a valid JSON object strictly matching this schema with no markdown or explanations:
+{
+  "enriched": [
+    {
+      "id": "skill_id_here",
+      "tags": "tag1, tag2, tag3, tag4",
+      "priorityTier": "High",
+      "benchmarkScore": 80
+    }
+  ]
+}`;
+
+    const aiRes = await generateAiCompletion({
+      prompt,
+      systemPrompt: 'You are SkillPulse AI Master Taxonomy Engine. Always respond in pure JSON.',
+      temperature: 0.1,
+      maxTokens: 2500
+    });
+
+    let enrichedData = [];
+    try {
+      const cleaned = (aiRes.content || '').replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      enrichedData = parsed.enriched || [];
+    } catch (parseErr) {
+      console.warn('AI response JSON parse error:', parseErr, aiRes.content);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'AI model returned an unparseable response format. Please try again.' 
+      });
+    }
+
+    // 3. Update enriched skills in Neon PostgreSQL database
+    let updatedCount = 0;
+    for (const item of enrichedData) {
+      if (item.id && item.tags) {
+        await prisma.skill.update({
+          where: { id: item.id },
+          data: {
+            description: item.tags,
+            priorityTier: item.priorityTier || 'Medium',
+            benchmarkScore: Number(item.benchmarkScore) || 75
+          }
+        }).catch(() => {});
+        updatedCount++;
+      }
+    }
+
+    if (req.user?.id || req.user?.userId) {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: null,
+          userId: req.user.id || req.user.userId,
+          action: 'TAXONOMY_AI_SYNCED',
+          resource: 'SkillTaxonomy',
+          details: {
+            skillsEnriched: updatedCount,
+            modelUsed: aiRes.model || 'Groq LPU (Llama-3.3-70b)'
+          }
+        }
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      message: `AI Taxonomy Synchronization Complete! ${updatedCount} competencies enriched with semantic tags and benchmark calibrations via ${aiRes.model || 'Groq LPU Llama-3.3-70b'}.`,
+      data: {
+        updatedCount,
+        model: aiRes.model || 'llama-3.3-70b-versatile',
+        provider: aiRes.provider || 'Groq LPU Engine'
+      }
+    });
   } catch (error) {
     next(error);
   }

@@ -12,6 +12,7 @@ import {
   createSkill,
   updateSkill,
   deleteSkill,
+  syncTaxonomyWithAI,
   getAIConfigs,
   createAIConfig,
   getAuditLogs,
@@ -51,6 +52,7 @@ router.get('/taxonomy', getSkillTaxonomy);
 router.post('/taxonomy/skills', createSkill);
 router.patch('/taxonomy/skills/:id', updateSkill);
 router.delete('/taxonomy/skills/:id', deleteSkill);
+router.post('/taxonomy/ai-sync', requireRole('SUPER_ADMIN'), syncTaxonomyWithAI);
 router.get('/ai-config', requireRole('SUPER_ADMIN'), getAIConfigs);
 router.post('/ai-config', requireRole('SUPER_ADMIN'), createAIConfig);
 router.patch('/ai-config/:id', requireRole('SUPER_ADMIN'), updateAIConfig);
