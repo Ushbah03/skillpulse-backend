@@ -20,14 +20,14 @@ export const createUser = async (req, res, next) => {
     // ─── PLAN-BASED ROLE RESTRICTION ────────────────────────────────────────
     // STARTER plan cannot assign premium roles (HR_MANAGER, TEAM_LEADER)
     const PREMIUM_ROLES = ['HR_MANAGER', 'TEAM_LEADER'];
-    if (PREMIUM_ROLES.includes(role) && req.user.role !== 'SUPER_ADMIN') {
+    if (PREMIUM_ROLES.includes(role) && tenantId) {
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
       const planLevel = { 'STARTER': 1, 'PRO': 2, 'Professional': 2, 'ENTERPRISE': 3, 'Enterprise AI': 3 };
       const tenantPlanLevel = planLevel[tenant?.plan] || 1;
       if (tenantPlanLevel < 2) {
         return res.status(403).json({
           success: false,
-          message: `Your current plan (${tenant?.plan || 'STARTER'}) does not allow assigning the '${role}' role. Upgrade to Professional or Enterprise to unlock premium roles.`,
+          message: `The selected company (${tenant?.name || 'Workspace'}) is on the ${tenant?.plan || 'STARTER'} plan, which does not allow assigning the '${role}' role. Upgrade to Professional or Enterprise to unlock premium roles.`,
           code: 'UPGRADE_REQUIRED'
         });
       }
@@ -274,7 +274,7 @@ export const getUsers = async (req, res, next) => {
     const users = await prisma.user.findMany({
       where: whereClause,
       include: {
-        tenant: { select: { id: true, name: true, slug: true, domain: true } },
+        tenant: { select: { id: true, name: true, slug: true, domain: true, plan: true } },
         department: { select: { id: true, name: true } },
         team: { select: { id: true, name: true } },
         _count: { select: { skills: true, skillGaps: true, enrollments: true } }
@@ -323,7 +323,28 @@ export const updateUserRole = async (req, res, next) => {
     let { departmentId } = req.body;
 
     const updateData = {};
-    if (role) updateData.role = role;
+    if (role) {
+      // ─── PLAN-BASED ROLE RESTRICTION ────────────────────────────────────────
+      const PREMIUM_ROLES = ['HR_MANAGER', 'TEAM_LEADER'];
+      if (PREMIUM_ROLES.includes(role)) {
+        const targetUser = await prisma.user.findUnique({
+          where: { id: userId },
+          include: { tenant: true }
+        });
+        if (targetUser?.tenant) {
+          const planLevel = { 'STARTER': 1, 'PRO': 2, 'Professional': 2, 'ENTERPRISE': 3, 'Enterprise AI': 3 };
+          const tenantPlanLevel = planLevel[targetUser.tenant.plan] || 1;
+          if (tenantPlanLevel < 2) {
+            return res.status(403).json({
+              success: false,
+              message: `This user's company (${targetUser.tenant.name}) is on the ${targetUser.tenant.plan} package, which does not allow assigning the '${role}' role. Upgrade the company to Professional or Enterprise to unlock premium roles.`,
+              code: 'UPGRADE_REQUIRED'
+            });
+          }
+        }
+      }
+      updateData.role = role;
+    }
     if (status) updateData.status = status;
     if (firstName) updateData.firstName = firstName.trim();
     if (lastName) updateData.lastName = lastName.trim();
