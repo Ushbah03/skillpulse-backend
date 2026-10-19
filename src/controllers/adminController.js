@@ -319,12 +319,15 @@ export const getDepartments = async (req, res, next) => {
 export const updateUserRole = async (req, res, next) => {
   try {
     const { userId } = req.params;
-    const { role, status, dept, teamId } = req.body;
+    const { role, status, dept, teamId, firstName, lastName, jobTitle } = req.body;
     let { departmentId } = req.body;
 
     const updateData = {};
     if (role) updateData.role = role;
     if (status) updateData.status = status;
+    if (firstName) updateData.firstName = firstName.trim();
+    if (lastName) updateData.lastName = lastName.trim();
+    if (jobTitle !== undefined) updateData.jobTitle = jobTitle;
 
     // Resolve dept string to departmentId (create if needed)
     if (dept) {
