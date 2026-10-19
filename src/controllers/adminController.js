@@ -1076,8 +1076,6 @@ export const getSecurityPolicies = async (req, res, next) => {
           ssoEnforced: false,
           mfaRequirement: 'optional',
           sessionTimeout: '60',
-          ipWhitelistingEnabled: false,
-          whitelistedIPs: '',
           passwordMinLength: 8,
           requireSpecialChar: true,
           auditLogRetentionDays: 90
@@ -1101,8 +1099,6 @@ export const getSecurityPolicies = async (req, res, next) => {
         ssoEnforced: paramMap.ssoEnforced !== undefined ? paramMap.ssoEnforced === 'true' : false,
         mfaRequirement: paramMap.mfaRequirement || 'optional',
         sessionTimeout: paramMap.sessionTimeout || '60',
-        ipWhitelistingEnabled: paramMap.ipWhitelistingEnabled === 'true',
-        whitelistedIPs: paramMap.whitelistedIPs || '',
         passwordMinLength: parseInt(paramMap.passwordMinLength || '8'),
         requireSpecialChar: paramMap.requireSpecialChar !== undefined ? paramMap.requireSpecialChar === 'true' : true,
         auditLogRetentionDays: parseInt(paramMap.auditLogRetentionDays || '90')

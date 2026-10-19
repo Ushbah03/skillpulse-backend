@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import prisma from '../config/db.js';
 import { sendEmail } from '../utils/sendEmail.js';
-import { getTenantSecurityPolicies, validatePasswordPolicy, checkIpWhitelisting } from '../utils/securityPolicies.js';
+import { getTenantSecurityPolicies, validatePasswordPolicy } from '../utils/securityPolicies.js';
 
 export const login = async (req, res, next) => {
   try {
@@ -83,19 +83,7 @@ export const login = async (req, res, next) => {
           });
         }
 
-        // 2. IP Whitelisting Enforcement
-        if (tenantPolicies.ipWhitelistingEnabled && tenantPolicies.whitelistedIPs) {
-          const rawIp = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || '').toString();
-          if (!checkIpWhitelisting(rawIp, tenantPolicies.whitelistedIPs)) {
-            const cleanIp = rawIp.split(',')[0].trim().replace(/^::ffff:/, '');
-            return res.status(403).json({
-              success: false,
-              message: `Access denied: Login attempted from an unauthorized IP address (${cleanIp || 'Unknown'}) according to your organization's security policy.`
-            });
-          }
-        }
-
-        // 3. Dynamic Session Timeout
+        // 2. Dynamic Session Timeout
         if (tenantPolicies.sessionTimeout) {
           sessionExpiry = `${tenantPolicies.sessionTimeout}m`;
         }

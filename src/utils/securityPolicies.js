@@ -18,8 +18,6 @@ export const getTenantSecurityPolicies = async (tenantId) => {
       ssoEnforced: policyMap.ssoEnforced === 'true',
       mfaRequirement: policyMap.mfaRequirement || 'optional',
       sessionTimeout: parseInt(policyMap.sessionTimeout || '60'),
-      ipWhitelistingEnabled: policyMap.ipWhitelistingEnabled === 'true',
-      whitelistedIPs: policyMap.whitelistedIPs || '',
       passwordMinLength: parseInt(policyMap.passwordMinLength || '8'),
       requireSpecialChar: policyMap.requireSpecialChar !== undefined ? policyMap.requireSpecialChar === 'true' : true,
       auditLogRetentionDays: parseInt(policyMap.auditLogRetentionDays || '90')
@@ -56,27 +54,4 @@ export const validatePasswordPolicy = async (password, tenantId) => {
   }
 
   return null;
-};
-
-/**
- * Check if IP is allowed based on corporate whitelisting
- */
-export const checkIpWhitelisting = (rawClientIp, whitelistedIPs) => {
-  if (!whitelistedIPs || !whitelistedIPs.trim()) return true;
-
-  const clientIp = (rawClientIp || '').split(',')[0].trim().replace(/^::ffff:/, '');
-  
-  // Always permit local development environments
-  if (['127.0.0.1', '::1', 'localhost'].includes(clientIp)) return true;
-
-  const allowedList = whitelistedIPs.split(',').map(s => s.trim()).filter(Boolean);
-  if (allowedList.length === 0) return true;
-
-  return allowedList.some(allowed => {
-    if (allowed.includes('/')) {
-      const prefix = allowed.split('/')[0].split('.').slice(0, 3).join('.');
-      return clientIp.startsWith(prefix);
-    }
-    return clientIp === allowed;
-  });
 };
