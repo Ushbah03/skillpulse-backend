@@ -15,10 +15,11 @@ import {
   syncTaxonomyWithAI,
   getAIConfigs,
   createAIConfig,
+  updateAIConfig,
+  testAIConnection,
   getAuditLogs,
   getDashboardStats,
   getGlobalTelemetry,
-  updateAIConfig,
   getSecurityPolicies,
   updateSecurityPolicies,
   getIntegrations,
@@ -56,6 +57,7 @@ router.post('/taxonomy/ai-sync', requireRole('SUPER_ADMIN'), syncTaxonomyWithAI)
 router.get('/ai-config', requireRole('SUPER_ADMIN'), getAIConfigs);
 router.post('/ai-config', requireRole('SUPER_ADMIN'), createAIConfig);
 router.patch('/ai-config/:id', requireRole('SUPER_ADMIN'), updateAIConfig);
+router.post('/ai-config/test-connection', requireRole('SUPER_ADMIN'), testAIConnection);
 router.get('/security-policies', getSecurityPolicies);
 router.patch('/security-policies', updateSecurityPolicies);
 router.get('/integrations', getIntegrations);

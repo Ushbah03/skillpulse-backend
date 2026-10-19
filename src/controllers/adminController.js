@@ -1277,6 +1277,101 @@ export const updateAIConfig = async (req, res, next) => {
   }
 };
 
+export const testAIConnection = async (req, res, next) => {
+  const startTime = Date.now();
+  const { 
+    modelName = 'openai/gpt-oss-120b', 
+    provider = 'Groq LPU Cloud',
+    groqApiKey,
+    openAiApiKey,
+    anthropicApiKey,
+    geminiApiKey,
+    openRouterApiKey
+  } = req.body;
+
+  if (groqApiKey && typeof groqApiKey === 'string' && groqApiKey.trim().startsWith('gsk_')) {
+    process.env.GROQ_API_KEY = groqApiKey.trim();
+  }
+  if (openAiApiKey && typeof openAiApiKey === 'string' && openAiApiKey.trim().startsWith('sk-')) {
+    process.env.OPENAI_API_KEY = openAiApiKey.trim();
+  }
+  if (anthropicApiKey && typeof anthropicApiKey === 'string' && anthropicApiKey.trim().startsWith('sk-ant-')) {
+    process.env.ANTHROPIC_API_KEY = anthropicApiKey.trim();
+  }
+  if (geminiApiKey && typeof geminiApiKey === 'string' && geminiApiKey.trim()) {
+    process.env.GEMINI_API_KEY = geminiApiKey.trim();
+  }
+  if (openRouterApiKey && typeof openRouterApiKey === 'string' && openRouterApiKey.trim().startsWith('sk-or-v1-')) {
+    process.env.OPENROUTER_API_KEY = openRouterApiKey.trim();
+  }
+
+  try {
+    const completion = await generateAiCompletion({
+      prompt: 'Echo diagnostic health ping in JSON: {"status":"ONLINE","message":"SkillPulse AI Engine Operational"}',
+      systemPrompt: 'You are SkillPulse AI diagnostic system. Respond strictly with the requested JSON object only.',
+      model: modelName,
+      provider: provider,
+      temperature: 0.1,
+      maxTokens: 100
+    });
+
+    const latencyMs = Date.now() - startTime;
+
+    if (req.user?.userId || req.user?.id) {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: req.tenantId || null,
+          userId: req.user.userId || req.user.id,
+          action: `AI_INTEGRATION_TEST_SUCCESS: ${completion.model || modelName} (${latencyMs}ms)`,
+          resource: 'AIModelConfig',
+          resourceId: 'test-execution',
+          details: {
+            model: completion.model || modelName,
+            provider: completion.provider || provider,
+            latencyMs
+          }
+        }
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      status: 'ONLINE',
+      model: completion.model || modelName,
+      provider: completion.provider || provider,
+      latencyMs,
+      content: completion.content,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    const latencyMs = Date.now() - startTime;
+    console.error('AI Integration Test Failed:', error.message);
+
+    if (req.user?.userId || req.user?.id) {
+      await prisma.auditLog.create({
+        data: {
+          tenantId: req.tenantId || null,
+          userId: req.user.userId || req.user.id,
+          action: `AI_INTEGRATION_TEST_FAILED: ${modelName} (${latencyMs}ms)`,
+          resource: 'AIModelConfig',
+          resourceId: 'test-execution',
+          details: {
+            model: modelName,
+            provider,
+            error: error.message
+          }
+        }
+      }).catch(() => {});
+    }
+
+    res.status(502).json({
+      success: false,
+      status: 'OFFLINE',
+      error: error.message || 'AI Engine test connection failed'
+    });
+  }
+};
+
 export const getSecurityPolicies = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
