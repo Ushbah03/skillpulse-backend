@@ -464,10 +464,12 @@ export const getSkillTaxonomy = async (req, res, next) => {
             _count: {
               select: {
                 userSkills: tenantId ? { where: { user: { tenantId } } } : true,
-                skillGaps: tenantId ? { where: { tenantId } } : true
+                skillGaps: tenantId ? { where: { tenantId } } : true,
+                courseSkills: true
               }
             }
-          }
+          },
+          orderBy: { name: 'asc' }
         }
       },
       orderBy: { name: 'asc' }
@@ -494,7 +496,7 @@ export const createSkill = async (req, res, next) => {
     const isSuper = req.user?.role === 'SUPER_ADMIN';
     const tenantId = isSuper ? null : req.tenantId;
 
-    // Prevent duplicate skill entries for the same tenant workspace
+    // Prevent duplicate skill entries (Documented in 6.3.4 Manage Skill Taxonomy: Validate Data -> Valid & Unique)
     const existingSkill = await prisma.skill.findFirst({
       where: {
         tenantId,
@@ -504,7 +506,10 @@ export const createSkill = async (req, res, next) => {
     });
 
     if (existingSkill) {
-      return res.status(200).json({ success: true, message: 'Skill node already exists.', data: existingSkill });
+      return res.status(400).json({
+        success: false,
+        message: `Skill competency '${trimmedName}' already exists in category '${existingSkill.category?.name || 'Taxonomy'}'. Please provide a unique skill name.`
+      });
     }
 
     let targetCategoryId = categoryId;
@@ -605,9 +610,9 @@ export const updateSkill = async (req, res, next) => {
     const updatedSkill = await prisma.skill.update({
       where: { id },
       data: {
-        name: name || existingSkill.name,
+        name: name ? name.trim() : existingSkill.name,
         categoryId,
-        description: description || existingSkill.description,
+        description: description !== undefined ? description : existingSkill.description,
         proficiencyLevel: req.body.level || req.body.proficiencyLevel || existingSkill.proficiencyLevel || 'Beginner',
         priorityTier: req.body.weightage || req.body.priorityTier || existingSkill.priorityTier || 'Low',
         benchmarkScore: req.body.benchmarkScore !== undefined ? Number(req.body.benchmarkScore) : existingSkill.benchmarkScore
@@ -639,13 +644,40 @@ export const deleteSkill = async (req, res, next) => {
     const { id } = req.params;
     const isSuper = req.user?.role === 'SUPER_ADMIN';
 
-    const existingSkill = await prisma.skill.findUnique({ where: { id } });
+    const existingSkill = await prisma.skill.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            userSkills: true,
+            skillGaps: true,
+            courseSkills: true
+          }
+        }
+      }
+    });
+
     if (!existingSkill) {
       return res.status(404).json({ success: false, message: 'Skill node not found.' });
     }
 
     if (!isSuper && existingSkill.tenantId && existingSkill.tenantId !== req.tenantId) {
       return res.status(403).json({ success: false, message: 'Access denied: Cannot delete another tenant skill.' });
+    }
+
+    // Check if skill is actively in use (Documented in 6.3.4 Manage Skill Taxonomy: Skill in Use -> Block & Show Warning)
+    const linkedUsers = existingSkill._count?.userSkills || 0;
+    const linkedGaps = existingSkill._count?.skillGaps || 0;
+
+    if (linkedUsers > 0 || linkedGaps > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete skill actively linked to users or assessments. It is linked to ${linkedUsers} active user profile(s) and ${linkedGaps} skill gap(s). Please unlink or reassign them before deletion.`
+      });
+    }
+
+    if (existingSkill._count?.courseSkills > 0) {
+      await prisma.courseSkill.deleteMany({ where: { skillId: id } });
     }
 
     await prisma.skill.delete({ where: { id } });
@@ -663,7 +695,7 @@ export const deleteSkill = async (req, res, next) => {
       }).catch(() => {});
     }
 
-    res.json({ success: true, message: 'Skill node deleted from database.', data: { id } });
+    res.json({ success: true, message: `Skill '${existingSkill.name}' removed from taxonomy.`, data: { id } });
   } catch (error) {
     next(error);
   }
