@@ -238,7 +238,7 @@ export const updateTenant = async (req, res, next) => {
     if (plan) updateData.plan = plan;
     if (maxUsers) updateData.maxUsers = parseInt(maxUsers);
     if (name) updateData.name = name;
-    if (domain) updateData.domain = domain;
+    if (domain !== undefined) updateData.domain = domain;
 
     const updated = await prisma.tenant.update({
       where: { id },
@@ -249,12 +249,12 @@ export const updateTenant = async (req, res, next) => {
     await prisma.auditLog.create({
       data: {
         tenantId: id,
-        userId: req.user.userId,
+        userId: req.user?.id || req.user?.userId,
         action: `TENANT_UPDATED: ${Object.keys(updateData).join(', ')}`,
         resource: 'Tenant',
         details: updateData
       }
-    });
+    }).catch(() => {});
 
     res.json({ success: true, message: 'Tenant updated.', data: updated });
   } catch (error) {
