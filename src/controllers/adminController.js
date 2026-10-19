@@ -755,18 +755,31 @@ Return ONLY a valid JSON object strictly matching this schema with no markdown o
 
     const aiRes = await generateAiCompletion({
       prompt,
-      systemPrompt: 'You are SkillPulse AI Master Taxonomy Engine. Always respond in pure JSON.',
+      systemPrompt: 'You are SkillPulse AI Master Taxonomy Engine. Always respond in pure JSON strictly adhering to schema.',
       temperature: 0.1,
       maxTokens: 2500
     });
 
+    const rawContent = aiRes.content || '';
+    if (!aiRes.success || !rawContent) {
+      return res.status(500).json({
+        success: false,
+        message: aiRes.error || 'AI inference failed to return a response from Groq LPU engine.'
+      });
+    }
+
     let enrichedData = [];
     try {
-      const cleaned = (aiRes.content || '').replace(/```json/gi, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(cleaned);
+      const firstBrace = rawContent.indexOf('{');
+      const lastBrace = rawContent.lastIndexOf('}');
+      if (firstBrace === -1 || lastBrace === -1) {
+        throw new Error('No JSON object boundary found in AI output');
+      }
+      const jsonStr = rawContent.substring(firstBrace, lastBrace + 1);
+      const parsed = JSON.parse(jsonStr);
       enrichedData = parsed.enriched || [];
     } catch (parseErr) {
-      console.warn('AI response JSON parse error:', parseErr, aiRes.content);
+      console.warn('AI response JSON parse error:', parseErr, rawContent);
       return res.status(500).json({ 
         success: false, 
         message: 'AI model returned an unparseable response format. Please try again.' 
@@ -798,7 +811,7 @@ Return ONLY a valid JSON object strictly matching this schema with no markdown o
           resource: 'SkillTaxonomy',
           details: {
             skillsEnriched: updatedCount,
-            modelUsed: aiRes.model || 'Groq LPU (Llama-3.3-70b)'
+            modelUsed: aiRes.model || 'openai/gpt-oss-120b'
           }
         }
       }).catch(() => {});
@@ -806,10 +819,10 @@ Return ONLY a valid JSON object strictly matching this schema with no markdown o
 
     res.json({
       success: true,
-      message: `AI Taxonomy Synchronization Complete! ${updatedCount} competencies enriched with semantic tags and benchmark calibrations via ${aiRes.model || 'Groq LPU Llama-3.3-70b'}.`,
+      message: `AI Taxonomy Synchronization Complete! ${updatedCount} competencies enriched with semantic tags and benchmark calibrations via ${aiRes.model || 'Groq LPU Engine'}.`,
       data: {
         updatedCount,
-        model: aiRes.model || 'llama-3.3-70b-versatile',
+        model: aiRes.model || 'openai/gpt-oss-120b',
         provider: aiRes.provider || 'Groq LPU Engine'
       }
     });

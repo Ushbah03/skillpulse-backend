@@ -1,15 +1,11 @@
 import Groq from 'groq-sdk';
 
-let groqClient = null;
-
 const getGroqClient = () => {
-  if (!groqClient) {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (apiKey && apiKey.startsWith('gsk_')) {
-      groqClient = new Groq({ apiKey });
-    }
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey || !apiKey.startsWith('gsk_')) {
+    return null;
   }
-  return groqClient;
+  return new Groq({ apiKey });
 };
 
 /**
@@ -38,20 +34,30 @@ export const generateAiCompletion = async ({
         throw new Error('Groq API Key (GROQ_API_KEY) is missing in backend .env');
       }
 
+      // Map legacy or deprecated model names to active Groq fast inference models
+      let activeGroqModel = model;
+      if (!activeGroqModel || activeGroqModel === 'groq/compound' || activeGroqModel.includes('llama-3.3') || activeGroqModel.includes('llama-3.1')) {
+        activeGroqModel = 'openai/gpt-oss-120b';
+      }
+
+      const isJsonExpected = (systemPrompt && systemPrompt.toLowerCase().includes('json')) || 
+                             (prompt && prompt.toLowerCase().includes('json'));
+
       const chatCompletion = await client.chat.completions.create({
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt }
         ],
-        model: model === 'groq/compound' ? 'llama-3.3-70b-versatile' : model,
+        model: activeGroqModel,
         temperature,
-        max_tokens: maxTokens
+        max_tokens: maxTokens,
+        ...(isJsonExpected ? { response_format: { type: 'json_object' } } : {})
       });
 
       const textResponse = chatCompletion.choices[0]?.message?.content || '';
       return {
         success: true,
-        model,
+        model: activeGroqModel,
         provider: 'Groq LPU Engine',
         content: textResponse,
         usage: chatCompletion.usage

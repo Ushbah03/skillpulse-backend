@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import * as dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ override: true });
 
 import authRoutes from './routes/authRoutes.js';
 import employeeRoutes from './routes/employeeRoutes.js';
