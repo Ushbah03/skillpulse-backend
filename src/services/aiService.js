@@ -1,7 +1,26 @@
 import Groq from 'groq-sdk';
+import prisma from '../config/db.js';
 
-const getGroqClient = () => {
-  const apiKey = process.env.GROQ_API_KEY;
+let cachedGroqKey = null;
+
+const getGroqClient = async () => {
+  let apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey || apiKey.includes('gsk_hvGquy') || !apiKey.startsWith('gsk_')) {
+    if (!cachedGroqKey) {
+      try {
+        const config = await prisma.aIModelConfig.findFirst({ where: { isActive: true } }) || 
+                       await prisma.aIModelConfig.findFirst();
+        const dbKey = config?.hyperparams?.configuredKeys?.groqApiKey;
+        if (dbKey && dbKey.startsWith('gsk_') && !dbKey.includes('gsk_hvGquy')) {
+          cachedGroqKey = dbKey;
+        }
+      } catch (err) {
+        // db lookup fallback
+      }
+    }
+    apiKey = cachedGroqKey || apiKey;
+  }
+
   if (!apiKey || !apiKey.startsWith('gsk_')) {
     return null;
   }
@@ -15,23 +34,23 @@ const getGroqClient = () => {
 export const generateAiCompletion = async ({
   prompt,
   systemPrompt = 'You are SkillPulse AI, an objective talent assessment engine.',
-  model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+  model = process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
   temperature = 0.2,
   maxTokens = 2048,
   provider = 'Groq'
 }) => {
   try {
-    const isGroq = provider.toLowerCase().includes('groq') || model.startsWith('groq/') || model.startsWith('llama-');
-    const isOpenAI = provider.toLowerCase().includes('openai') || model.startsWith('gpt-');
+    const isGroq = provider.toLowerCase().includes('groq') || model.startsWith('groq/') || model.startsWith('llama-') || model.includes('gpt-oss');
+    const isOpenAI = (provider.toLowerCase().includes('openai') && !model.includes('gpt-oss')) || (model.startsWith('gpt-') && !model.includes('gpt-oss'));
     const isClaude = provider.toLowerCase().includes('anthropic') || provider.toLowerCase().includes('claude') || model.startsWith('claude-');
     const isGemini = provider.toLowerCase().includes('gemini') || model.startsWith('gemini-');
     const isOpenRouter = provider.toLowerCase().includes('openrouter') || model.includes(':free') || model.startsWith('openrouter/') || model.startsWith('meta-llama/') || model.startsWith('deepseek/');
 
     // 1. Groq LPU Engine (Default 100% Free)
     if (isGroq && !isOpenRouter) {
-      const client = getGroqClient();
+      const client = await getGroqClient();
       if (!client) {
-        throw new Error('Groq API Key (GROQ_API_KEY) is missing in backend .env');
+        throw new Error('Groq API Key is unconfigured or invalid in backend settings.');
       }
 
       // Map legacy or deprecated model names to active Groq fast inference models
