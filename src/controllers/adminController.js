@@ -59,6 +59,8 @@ export const createUser = async (req, res, next) => {
         });
         departmentId = newDept.id;
       }
+    }
+
     // Validate password complexity according to tenant security policy
     const pwdErr = await validatePasswordPolicy(password, tenantId);
     if (pwdErr) {
