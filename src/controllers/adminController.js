@@ -761,22 +761,26 @@ export const getDashboardStats = async (req, res, next) => {
       }
     });
 
-    const deptSkillCompletion = departments.map(d => {
-      let totalProf = 0;
-      let count = 0;
-      (d.members || []).forEach(u => {
-        (u.skills || []).forEach(s => {
-          totalProf += s.proficiencyLevel;
-          count++;
+    const deptSkillCompletion = departments
+      .filter(d => (d.members && d.members.length > 0))
+      .map(d => {
+        let totalProf = 0;
+        let count = 0;
+        (d.members || []).forEach(u => {
+          (u.skills || []).forEach(s => {
+            totalProf += s.proficiencyLevel;
+            count++;
+          });
         });
-      });
-      // Fallback to 0 if no skills exist, no more fake 3.5 data
-      const avg = count ? (totalProf / count) : 0;
-      return {
-        dept: d.name,
-        rate: Math.min(100, Math.round((avg / 5.0) * 100))
-      };
-    });
+        const avg = count ? (totalProf / count) : 0;
+        return {
+          dept: d.name,
+          memberCount: d.members.length,
+          skillsCount: count,
+          rate: Math.min(100, Math.round((avg / 5.0) * 100))
+        };
+      })
+      .sort((a, b) => b.rate - a.rate);
 
     const allUserSkills = await prisma.userSkill.findMany({
       where: { user: { tenantId } },
@@ -784,23 +788,36 @@ export const getDashboardStats = async (req, res, next) => {
     });
 
     const totalSkillProf = allUserSkills.reduce((sum, s) => sum + s.proficiencyLevel, 0);
-    // Fallback to 0 if no skills exist, no more fake 3.5 data
     const avgSkillProf = allUserSkills.length ? (totalSkillProf / allUserSkills.length) : 0;
     const readinessPct = Math.min(100, Math.round((avgSkillProf / 5.0) * 100 * 10) / 10);
 
-    const courseCount = await prisma.course.count();
+    const courseCount = await prisma.course.count({
+      where: {
+        OR: [
+          { tenantId },
+          { tenantId: null }
+        ]
+      }
+    });
 
     const recentAuditLogs = await prisma.auditLog.findMany({
       where: { tenantId },
       include: { user: { select: { firstName: true, lastName: true, email: true, role: true } } },
       orderBy: { createdAt: 'desc' },
-      take: 3
+      take: 4
     });
+
+    const integrations = await prisma.integrationConfig.findMany({
+      where: { tenantId },
+      orderBy: { updatedAt: 'desc' }
+    });
+    const activeIntegrationsCount = integrations.filter(i => i.isEnabled && i.status === 'ACTIVE').length;
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const usersForMonth = await prisma.user.findMany({
       where: { tenantId },
-      select: { createdAt: true }
+      select: { createdAt: true },
+      orderBy: { createdAt: 'asc' }
     });
 
     const monthCountMap = {};
@@ -814,8 +831,8 @@ export const getDashboardStats = async (req, res, next) => {
       cumulativeUsers += (monthCountMap[m] || 0);
       return {
         month: m,
-        active: cumulativeUsers || activeUsersCount,
-        capacity: tenant?.maxUsers || 100
+        active: cumulativeUsers,
+        capacity: tenant?.maxUsers || 0
       };
     });
 
@@ -827,15 +844,18 @@ export const getDashboardStats = async (req, res, next) => {
         domain: tenant?.domain || tenant?.slug || '',
         slug: tenant?.slug || '',
         themeSettings: tenant?.themeSettings || null,
-        plan: tenant?.plan || 'PRO',
-        maxUsers: tenant?.maxUsers || 100,
+        plan: tenant?.plan || 'STARTER',
+        maxUsers: tenant?.maxUsers || 0,
         activeUsersCount,
         totalUsersCount,
         readinessPct,
         courseCount,
         recentAuditLogs,
         deptSkillCompletion,
-        userActivityData
+        userActivityData,
+        integrations,
+        activeIntegrationsCount,
+        integrationsCount: integrations.length
       }
     });
   } catch (error) {
