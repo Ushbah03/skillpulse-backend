@@ -814,24 +814,24 @@ export const getDashboardStats = async (req, res, next) => {
     const activeIntegrationsCount = integrations.filter(i => i.isEnabled && i.status === 'ACTIVE').length;
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const usersForMonth = await prisma.user.findMany({
+    const currentMonthIndex = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+
+    const allUsers = await prisma.user.findMany({
       where: { tenantId },
       select: { createdAt: true },
       orderBy: { createdAt: 'asc' }
     });
 
-    const monthCountMap = {};
-    usersForMonth.forEach(u => {
-      const m = monthNames[u.createdAt.getMonth()];
-      monthCountMap[m] = (monthCountMap[m] || 0) + 1;
-    });
+    // Strictly only include months that have occurred up to current month (zero future months)
+    const monthsToDate = monthNames.slice(0, currentMonthIndex + 1);
 
-    let cumulativeUsers = 0;
-    const userActivityData = monthNames.map(m => {
-      cumulativeUsers += (monthCountMap[m] || 0);
+    const userActivityData = monthsToDate.map((m, idx) => {
+      const endOfMonth = new Date(currentYear, idx + 1, 0, 23, 59, 59, 999);
+      const activeCount = allUsers.filter(u => new Date(u.createdAt) <= endOfMonth).length;
       return {
         month: m,
-        active: cumulativeUsers,
+        active: activeCount,
         capacity: tenant?.maxUsers || 0
       };
     });
