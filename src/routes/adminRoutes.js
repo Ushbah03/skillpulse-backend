@@ -23,7 +23,8 @@ import {
   getIntegrations,
   createIntegration,
   updateIntegrationStatus,
-  triggerIntegrationSync
+  triggerIntegrationSync,
+  updateOrganizationProfile
 } from '../controllers/adminController.js';
 import { syncHrisDirectory } from '../controllers/hrisSyncController.js';
 import { syncLmsCatalog } from '../controllers/lmsSyncController.js';
@@ -40,6 +41,7 @@ router.post('/tenants', requireRole('SUPER_ADMIN'), createTenant);
 router.patch('/tenants/:id', requireRole('SUPER_ADMIN'), updateTenant);
 router.get('/global-telemetry', requireRole('SUPER_ADMIN'), getGlobalTelemetry);
 router.get('/dashboard', getDashboardStats);
+router.patch('/organization', updateOrganizationProfile);
 router.get('/users', getUsers);
 router.get('/departments', getDepartments);
 router.post('/users', createUser);

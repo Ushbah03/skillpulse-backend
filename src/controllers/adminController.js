@@ -824,6 +824,9 @@ export const getDashboardStats = async (req, res, next) => {
       data: {
         tenantId: tenantId,
         tenantName: tenant?.name || 'Enterprise Workspace',
+        domain: tenant?.domain || tenant?.slug || '',
+        slug: tenant?.slug || '',
+        themeSettings: tenant?.themeSettings || null,
         plan: tenant?.plan || 'PRO',
         maxUsers: tenant?.maxUsers || 100,
         activeUsersCount,
@@ -1408,6 +1411,53 @@ export const triggerIntegrationSync = async (req, res, next) => {
     });
 
     res.json({ success: true, message: 'Global sync completed across active enterprise connectors.' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateOrganizationProfile = async (req, res, next) => {
+  try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ success: false, message: 'Tenant identifier missing.' });
+    }
+
+    const { legalName, domain, themeColor } = req.body;
+    const updateData = {};
+    if (legalName && legalName.trim()) updateData.name = legalName.trim();
+    if (domain !== undefined) updateData.domain = domain.trim().toLowerCase();
+    if (themeColor) {
+      updateData.themeSettings = { primaryColor: themeColor };
+    }
+
+    const updatedTenant = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: updateData
+    });
+
+    if (req.user?.id || req.user?.userId) {
+      await prisma.auditLog.create({
+        data: {
+          tenantId,
+          userId: req.user.id || req.user.userId,
+          action: 'ORGANIZATION_PROFILE_UPDATED',
+          resource: 'Tenant',
+          resourceId: tenantId,
+          details: { name: updatedTenant.name, domain: updatedTenant.domain, themeColor }
+        }
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      message: 'Organization settings updated successfully in workspace.',
+      data: {
+        legalName: updatedTenant.name,
+        domain: updatedTenant.domain || updatedTenant.slug,
+        themeColor: updatedTenant.themeSettings?.primaryColor || '#6366F1'
+      }
+    });
   } catch (error) {
     next(error);
   }
