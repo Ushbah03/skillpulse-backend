@@ -26,6 +26,7 @@ import {
   createIntegration,
   updateIntegrationStatus,
   triggerIntegrationSync,
+  validateIntegrationConnection,
   updateOrganizationProfile
 } from '../controllers/adminController.js';
 import { syncHrisDirectory } from '../controllers/hrisSyncController.js';
@@ -63,6 +64,7 @@ router.patch('/security-policies', updateSecurityPolicies);
 router.get('/integrations', getIntegrations);
 router.post('/integrations', createIntegration);
 router.patch('/integrations/:id/status', updateIntegrationStatus);
+router.post('/integrations/:id/validate', validateIntegrationConnection);
 router.post('/integrations/sync', triggerIntegrationSync);
 router.post('/integrations/hris/sync', syncHrisDirectory);
 router.post('/integrations/lms/sync', syncLmsCatalog);
