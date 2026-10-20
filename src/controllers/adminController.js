@@ -921,7 +921,7 @@ export const getAuditLogs = async (req, res, next) => {
           tenant: { select: { name: true, slug: true } }
         },
         orderBy: { createdAt: 'desc' },
-        take: 100
+        take: 250
       })
     ]);
 
