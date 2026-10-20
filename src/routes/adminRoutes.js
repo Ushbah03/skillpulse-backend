@@ -27,7 +27,9 @@ import {
   updateIntegrationStatus,
   triggerIntegrationSync,
   validateIntegrationConnection,
-  updateOrganizationProfile
+  updateOrganizationProfile,
+  getPricingTiers,
+  updatePricingTiers
 } from '../controllers/adminController.js';
 import { syncHrisDirectory } from '../controllers/hrisSyncController.js';
 import { syncLmsCatalog } from '../controllers/lmsSyncController.js';
@@ -61,6 +63,8 @@ router.patch('/ai-config/:id', requireRole('SUPER_ADMIN'), updateAIConfig);
 router.post('/ai-config/test-connection', requireRole('SUPER_ADMIN'), testAIConnection);
 router.get('/security-policies', getSecurityPolicies);
 router.patch('/security-policies', updateSecurityPolicies);
+router.get('/billing/tiers', requireRole('SUPER_ADMIN'), getPricingTiers);
+router.patch('/billing/tiers', requireRole('SUPER_ADMIN'), updatePricingTiers);
 router.get('/integrations', getIntegrations);
 router.post('/integrations', createIntegration);
 router.patch('/integrations/:id/status', updateIntegrationStatus);

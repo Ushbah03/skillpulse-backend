@@ -1914,3 +1914,97 @@ export const updateOrganizationProfile = async (req, res, next) => {
     next(error);
   }
 };
+
+export const getPricingTiers = async (req, res, next) => {
+  try {
+    const tierParam = await prisma.systemParameter.findFirst({
+      where: { key: 'SAAS_PRICING_TIERS' }
+    });
+
+    let tiers = {
+      STARTER: { name: 'Starter Plan', rate: 600, annualRate: 500, defaultSeats: 30, desc: 'Essential skill assessment and taxonomy management for small teams.' },
+      PRO: { name: 'Professional Plan', rate: 1200, annualRate: 1000, defaultSeats: 250, desc: 'Comprehensive AI gap detection, team leadership, and HR analytics for growing companies.' },
+      ENTERPRISE: { name: 'Enterprise AI', rate: 2500, annualRate: 2000, defaultSeats: 1000, desc: 'Large-scale organization intelligence with 1,000 user seats and global integrations.' }
+    };
+
+    if (tierParam?.value) {
+      try {
+        const parsed = JSON.parse(tierParam.value);
+        tiers = { ...tiers, ...parsed };
+      } catch (e) {}
+    }
+
+    const stripeConfig = await prisma.integrationConfig.findFirst({
+      where: { type: { contains: 'STRIPE' } }
+    });
+
+    res.json({
+      success: true,
+      data: tiers,
+      gateway: {
+        provider: 'Stripe',
+        status: stripeConfig?.status === 'ACTIVE' ? 'ONLINE' : 'CONFIGURED',
+        endpointUrl: stripeConfig?.endpointUrl || 'https://api.stripe.com/v1',
+        mode: process.env.STRIPE_SECRET_KEY ? 'Live/Test API Key Connected' : 'Sandbox Config'
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updatePricingTiers = async (req, res, next) => {
+  try {
+    const { tiers } = req.body;
+    if (!tiers || typeof tiers !== 'object') {
+      return res.status(400).json({ success: false, message: 'Invalid tiers configuration data.' });
+    }
+
+    const defaultTenant = await prisma.tenant.findFirst({ where: { status: 'ACTIVE' } });
+    const tenantId = req.tenantId || defaultTenant?.id;
+
+    const existing = await prisma.systemParameter.findFirst({
+      where: { key: 'SAAS_PRICING_TIERS' }
+    });
+
+    let saved;
+    if (existing) {
+      saved = await prisma.systemParameter.update({
+        where: { id: existing.id },
+        data: { value: JSON.stringify(tiers) }
+      });
+    } else {
+      saved = await prisma.systemParameter.create({
+        data: {
+          tenantId,
+          key: 'SAAS_PRICING_TIERS',
+          value: JSON.stringify(tiers),
+          description: 'Global SaaS pricing subscription tier models and rates',
+          isGlobal: true
+        }
+      });
+    }
+
+    if (req.user?.id || req.user?.userId) {
+      await prisma.auditLog.create({
+        data: {
+          tenantId,
+          userId: req.user.id || req.user.userId,
+          action: 'SAAS_PRICING_TIERS_UPDATED',
+          resource: 'SystemParameter',
+          resourceId: saved.id,
+          details: { updatedTiers: tiers }
+        }
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      message: 'SaaS pricing subscription tiers updated and synchronized in database.',
+      data: tiers
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
