@@ -2008,3 +2008,308 @@ export const updatePricingTiers = async (req, res, next) => {
   }
 };
 
+// ==========================================
+// RBAC ROLE PERMISSIONS MATRIX & CONTROLS
+// ==========================================
+
+export const DEFAULT_RBAC_PERMISSIONS = {
+  SUPER_ADMIN: {
+    tenantManagement: true,
+    userManagement: true,
+    taxonomyEdit: true,
+    aiConfigAccess: true,
+    globalIntegrations: true,
+    securityAuditLogs: true,
+    billingAccess: true,
+    workforceAnalytics: true,
+    careerSuccession: true,
+    teamFormation: true,
+    learningAssignment: true,
+    selfAssessment: true,
+  },
+  COMPANY_ADMIN: {
+    tenantManagement: false,
+    userManagement: true,
+    taxonomyEdit: true,
+    aiConfigAccess: false,
+    globalIntegrations: true,
+    securityAuditLogs: true,
+    billingAccess: true,
+    workforceAnalytics: true,
+    careerSuccession: true,
+    teamFormation: true,
+    learningAssignment: true,
+    selfAssessment: true,
+  },
+  HR_MANAGER: {
+    tenantManagement: false,
+    userManagement: false,
+    taxonomyEdit: false,
+    aiConfigAccess: false,
+    globalIntegrations: false,
+    securityAuditLogs: false,
+    billingAccess: false,
+    workforceAnalytics: true,
+    careerSuccession: true,
+    teamFormation: false,
+    learningAssignment: true,
+    selfAssessment: true,
+  },
+  TEAM_LEADER: {
+    tenantManagement: false,
+    userManagement: false,
+    taxonomyEdit: false,
+    aiConfigAccess: false,
+    globalIntegrations: false,
+    securityAuditLogs: false,
+    billingAccess: false,
+    workforceAnalytics: false,
+    careerSuccession: false,
+    teamFormation: true,
+    learningAssignment: true,
+    selfAssessment: true,
+  },
+  EMPLOYEE: {
+    tenantManagement: false,
+    userManagement: false,
+    taxonomyEdit: false,
+    aiConfigAccess: false,
+    globalIntegrations: false,
+    securityAuditLogs: false,
+    billingAccess: false,
+    workforceAnalytics: false,
+    careerSuccession: false,
+    teamFormation: false,
+    learningAssignment: false,
+    selfAssessment: true,
+  }
+};
+
+export const getRolePermissions = async (req, res, next) => {
+  try {
+    const existing = await prisma.systemParameter.findFirst({
+      where: { key: 'SYSTEM_RBAC_PERMISSIONS' }
+    });
+
+    let permissionsData = DEFAULT_RBAC_PERMISSIONS;
+    let meta = {
+      applyMode: 'IMMEDIATE',
+      status: 'ACTIVE_ENFORCED',
+      lastModifiedBy: 'SYSTEM_DEFAULT',
+      lastModifiedAt: new Date().toISOString()
+    };
+
+    if (existing && existing.value) {
+      try {
+        const parsed = JSON.parse(existing.value);
+        if (parsed.permissions) {
+          permissionsData = parsed.permissions;
+          meta = {
+            applyMode: parsed.applyMode || 'IMMEDIATE',
+            status: parsed.status || 'ACTIVE_ENFORCED',
+            lastModifiedBy: parsed.lastModifiedBy || 'SUPER_ADMIN',
+            lastModifiedAt: parsed.lastModifiedAt || existing.updatedAt.toISOString()
+          };
+        } else {
+          permissionsData = parsed;
+        }
+      } catch (err) {
+        console.warn('Failed parsing RBAC parameter from DB, falling back to SRS baseline', err);
+      }
+    } else {
+      await prisma.systemParameter.create({
+        data: {
+          key: 'SYSTEM_RBAC_PERMISSIONS',
+          value: JSON.stringify({
+            permissions: DEFAULT_RBAC_PERMISSIONS,
+            applyMode: 'IMMEDIATE',
+            status: 'ACTIVE_ENFORCED',
+            lastModifiedBy: req.user?.email || 'SUPER_ADMIN',
+            lastModifiedAt: new Date().toISOString()
+          }),
+          description: 'Global RBAC role permissions configuration',
+          isGlobal: true
+        }
+      }).catch(() => {});
+    }
+
+    const userCounts = await prisma.user.groupBy({
+      by: ['role'],
+      _count: { id: true }
+    });
+    const roleCounts = {};
+    userCounts.forEach(c => {
+      roleCounts[c.role] = c._count.id;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        permissions: permissionsData,
+        roleCounts,
+        meta
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const updateRolePermissions = async (req, res, next) => {
+  try {
+    const { roleKey, permissions, applyMode = 'IMMEDIATE' } = req.body;
+
+    if (!roleKey || !permissions) {
+      return res.status(400).json({ success: false, message: 'roleKey and permissions object are required.' });
+    }
+
+    const existing = await prisma.systemParameter.findFirst({
+      where: { key: 'SYSTEM_RBAC_PERMISSIONS' }
+    });
+
+    let currentPermissions = { ...DEFAULT_RBAC_PERMISSIONS };
+    if (existing && existing.value) {
+      try {
+        const parsed = JSON.parse(existing.value);
+        if (parsed.permissions) {
+          currentPermissions = { ...currentPermissions, ...parsed.permissions };
+        } else {
+          currentPermissions = { ...currentPermissions, ...parsed };
+        }
+      } catch (err) {
+        console.warn('Parsing existing RBAC config failed', err);
+      }
+    }
+
+    currentPermissions[roleKey] = {
+      ...currentPermissions[roleKey],
+      ...permissions
+    };
+
+    const meta = {
+      permissions: currentPermissions,
+      applyMode,
+      status: applyMode === 'SCHEDULED' ? 'SCHEDULED_MAINTENANCE' : 'ACTIVE_ENFORCED',
+      lastModifiedBy: req.user?.email || 'SUPER_ADMIN',
+      lastModifiedAt: new Date().toISOString()
+    };
+
+    if (existing) {
+      await prisma.systemParameter.update({
+        where: { id: existing.id },
+        data: { value: JSON.stringify(meta) }
+      });
+    } else {
+      await prisma.systemParameter.create({
+        data: {
+          key: 'SYSTEM_RBAC_PERMISSIONS',
+          value: JSON.stringify(meta),
+          description: 'Global RBAC role permissions configuration',
+          isGlobal: true
+        }
+      });
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: req.tenantId || null,
+        userId: req.user?.id || req.user?.userId || null,
+        action: 'RBAC_PERMISSIONS_UPDATED',
+        resource: 'RoleRBAC',
+        details: {
+          roleKey,
+          applyMode,
+          status: meta.status,
+          updatedPermissions: permissions,
+          performedBy: req.user?.email || 'SUPER_ADMIN'
+        }
+      }
+    }).catch(() => {});
+
+    res.json({
+      success: true,
+      message: applyMode === 'SCHEDULED' 
+        ? `Role ${roleKey} permissions queued for scheduled maintenance window.`
+        : `Role ${roleKey} permissions applied live and persisted to database.`,
+      data: {
+        permissions: currentPermissions,
+        meta
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resetRolePermissions = async (req, res, next) => {
+  try {
+    const { roleKey } = req.body;
+
+    const existing = await prisma.systemParameter.findFirst({
+      where: { key: 'SYSTEM_RBAC_PERMISSIONS' }
+    });
+
+    let currentPermissions = { ...DEFAULT_RBAC_PERMISSIONS };
+    if (existing && existing.value && roleKey) {
+      try {
+        const parsed = JSON.parse(existing.value);
+        const stored = parsed.permissions || parsed;
+        currentPermissions = { ...stored, [roleKey]: { ...DEFAULT_RBAC_PERMISSIONS[roleKey] } };
+      } catch (err) {
+        currentPermissions = { ...DEFAULT_RBAC_PERMISSIONS };
+      }
+    }
+
+    const meta = {
+      permissions: currentPermissions,
+      applyMode: 'IMMEDIATE',
+      status: 'ACTIVE_ENFORCED',
+      lastModifiedBy: req.user?.email || 'SUPER_ADMIN',
+      lastModifiedAt: new Date().toISOString()
+    };
+
+    if (existing) {
+      await prisma.systemParameter.update({
+        where: { id: existing.id },
+        data: { value: JSON.stringify(meta) }
+      });
+    } else {
+      await prisma.systemParameter.create({
+        data: {
+          key: 'SYSTEM_RBAC_PERMISSIONS',
+          value: JSON.stringify(meta),
+          description: 'Global RBAC role permissions configuration',
+          isGlobal: true
+        }
+      });
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId: req.tenantId || null,
+        userId: req.user?.id || req.user?.userId || null,
+        action: 'RBAC_PERMISSIONS_RESET',
+        resource: 'RoleRBAC',
+        details: {
+          roleKey: roleKey || 'ALL_ROLES',
+          performedBy: req.user?.email || 'SUPER_ADMIN'
+        }
+      }
+    }).catch(() => {});
+
+    res.json({
+      success: true,
+      message: roleKey 
+        ? `Permissions for ${roleKey} successfully reset to canonical SRS baseline.`
+        : 'All role permissions successfully reset to canonical SRS baseline.',
+      data: {
+        permissions: currentPermissions,
+        meta
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+

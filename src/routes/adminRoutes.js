@@ -29,7 +29,10 @@ import {
   validateIntegrationConnection,
   updateOrganizationProfile,
   getPricingTiers,
-  updatePricingTiers
+  updatePricingTiers,
+  getRolePermissions,
+  updateRolePermissions,
+  resetRolePermissions
 } from '../controllers/adminController.js';
 import { syncHrisDirectory } from '../controllers/hrisSyncController.js';
 import { syncLmsCatalog } from '../controllers/lmsSyncController.js';
@@ -65,6 +68,9 @@ router.get('/security-policies', getSecurityPolicies);
 router.patch('/security-policies', updateSecurityPolicies);
 router.get('/billing/tiers', requireRole('SUPER_ADMIN'), getPricingTiers);
 router.patch('/billing/tiers', requireRole('SUPER_ADMIN'), updatePricingTiers);
+router.get('/roles/permissions', requireRole('SUPER_ADMIN'), getRolePermissions);
+router.patch('/roles/permissions', requireRole('SUPER_ADMIN'), updateRolePermissions);
+router.post('/roles/reset-permissions', requireRole('SUPER_ADMIN'), resetRolePermissions);
 router.get('/integrations', getIntegrations);
 router.post('/integrations', createIntegration);
 router.patch('/integrations/:id/status', updateIntegrationStatus);
