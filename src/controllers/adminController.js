@@ -1058,11 +1058,31 @@ export const getDashboardStats = async (req, res, next) => {
 export const getGlobalTelemetry = async (req, res, next) => {
   try {
     const startTime = Date.now();
-    const [tenantsCount, activeTenantCount, totalUsersCount, sumMaxUsersResult, logCount, errorLogCount, tenants, recentAuditLogs] = await Promise.all([
+    const [
+      tenantsCount,
+      activeTenantCount,
+      suspendedTenantCount,
+      totalUsersCount,
+      usersByRole,
+      sumMaxUsersResult,
+      skillsCount,
+      categoriesCount,
+      activeAIConfig,
+      logCount,
+      errorLogCount,
+      allTenants,
+      recentAuditLogs,
+      pricingParam
+    ] = await Promise.all([
       prisma.tenant.count(),
       prisma.tenant.count({ where: { status: 'ACTIVE' } }),
+      prisma.tenant.count({ where: { status: 'SUSPENDED' } }),
       prisma.user.count(),
+      prisma.user.groupBy({ by: ['role'], _count: { id: true } }),
       prisma.tenant.aggregate({ _sum: { maxUsers: true } }),
+      prisma.skill.count(),
+      prisma.skillCategory.count(),
+      prisma.aIModelConfig.findFirst({ where: { isActive: true } }),
       prisma.auditLog.count(),
       prisma.auditLog.count({
         where: {
@@ -1074,22 +1094,25 @@ export const getGlobalTelemetry = async (req, res, next) => {
       }),
       prisma.tenant.findMany({
         include: { _count: { select: { users: true } } },
-        orderBy: { createdAt: 'desc' },
-        take: 5
+        orderBy: { createdAt: 'desc' }
       }),
       prisma.auditLog.findMany({
         include: { user: { select: { firstName: true, lastName: true, email: true, role: true } } },
         orderBy: { createdAt: 'desc' },
-        take: 4
-      })
+        take: 6
+      }),
+      prisma.systemParameter.findFirst({ where: { key: 'SAAS_PRICING_TIERS' } })
     ]);
 
-    const totalSeatLimit = sumMaxUsersResult._sum.maxUsers || 1000;
+    const totalSeatLimit = sumMaxUsersResult._sum.maxUsers || 0;
 
-    const mappedTenants = tenants.map(t => ({
+    const mappedTenants = allTenants.map(t => ({
+      id: t.id,
       name: t.name,
       domain: t.domain || `${t.slug}.com`,
       seats: `${t._count.users} / ${t.maxUsers}`,
+      userCount: t._count.users,
+      maxUsers: t.maxUsers,
       tier: t.plan,
       status: t.status === 'ACTIVE' ? 'Active' : 'Suspended',
       usage: Math.min(100, Math.round((t._count.users / Math.max(1, t.maxUsers)) * 100))
@@ -1103,12 +1126,52 @@ export const getGlobalTelemetry = async (req, res, next) => {
     const memUsage = process.memoryUsage();
     const heapLoadPct = Math.min(95, Math.max(10, Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100)));
 
+    // Role breakdown from DB
+    const roleCounts = {};
+    usersByRole.forEach(r => { roleCounts[r.role] = r._count.id; });
+
+    // Plan distribution from DB
+    const planCounts = {
+      STARTER: allTenants.filter(t => t.plan === 'STARTER').length,
+      PRO: allTenants.filter(t => t.plan === 'PRO').length,
+      ENTERPRISE: allTenants.filter(t => t.plan === 'ENTERPRISE').length
+    };
+
+    // Calculate real Monthly Recurring Revenue (MRR) from active tenant subscriptions
+    let tierPrices = { STARTER: 49, PRO: 199, ENTERPRISE: 499 };
+    if (pricingParam?.value) {
+      try {
+        const parsed = JSON.parse(pricingParam.value);
+        if (parsed.STARTER?.priceMonthly) tierPrices.STARTER = parsed.STARTER.priceMonthly;
+        if (parsed.PRO?.priceMonthly) tierPrices.PRO = parsed.PRO.priceMonthly;
+        if (parsed.ENTERPRISE?.priceMonthly) tierPrices.ENTERPRISE = parsed.ENTERPRISE.priceMonthly;
+      } catch (e) {}
+    }
+
+    const calculatedMRR = allTenants
+      .filter(t => t.status === 'ACTIVE')
+      .reduce((sum, t) => sum + (tierPrices[t.plan] || 0), 0);
+
     res.json({
       success: true,
       data: {
-        tenantsCount: activeTenantCount,
+        tenantsCount,
+        activeTenantCount,
+        suspendedTenantCount,
         totalUsersCount,
         totalSeatLimit,
+        seatUsagePct: totalSeatLimit > 0 ? Math.min(100, Math.round((totalUsersCount / totalSeatLimit) * 100 * 10) / 10) : 0,
+        skillsCount,
+        categoriesCount,
+        activeAIModel: activeAIConfig ? {
+          modelName: activeAIConfig.modelName,
+          provider: activeAIConfig.provider,
+          version: activeAIConfig.version,
+          contextWindow: activeAIConfig.contextWindow
+        } : null,
+        planDistribution: planCounts,
+        roleDistribution: roleCounts,
+        mrr: calculatedMRR,
         recentTenants: mappedTenants,
         recentAuditLogs
       },
@@ -1117,6 +1180,8 @@ export const getGlobalTelemetry = async (req, res, next) => {
         latency: `${queryLatencyMs} ms`,
         aiErrorRate: `${aiErrorRatePct}%`,
         cpuLoad: `${heapLoadPct}% Load`,
+        memoryUsedMB: (memUsage.heapUsed / 1024 / 1024).toFixed(1),
+        memoryTotalMB: (memUsage.heapTotal / 1024 / 1024).toFixed(1),
         totalTenants: tenantsCount,
         totalUsers: totalUsersCount,
         totalAuditLogs: logCount
