@@ -180,5 +180,38 @@ describe('--- ZERO-DUMMY / ZERO-FAKE DATA INTEGRITY AUDIT TEST SUITE ---', () =>
       assert.ok(!content.includes('const mockCerts ='), 'No mockCerts allowed');
       assert.ok(!content.includes('const dummyCerts ='), 'No dummyCerts allowed');
     });
+
+    test('Team Leader components initialize state with empty arrays and have zero mock data', () => {
+      const teamFiles = ['TeamSkillOverview.jsx', 'TeamTrainingRequests.jsx', 'TeamFormation.jsx', 'PerformanceMonitor.jsx'];
+      teamFiles.forEach(fileName => {
+        const filePath = path.join(frontendDir, fileName);
+        assert.ok(fs.existsSync(filePath), `${fileName} must exist`);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        assert.ok(!content.includes('const mockMembers ='), `No mockMembers in ${fileName}`);
+        assert.ok(!content.includes('const dummyMembers ='), `No dummyMembers in ${fileName}`);
+      });
+    });
+
+    test('HR Manager components initialize state with empty arrays and have zero mock data', () => {
+      const hrFiles = ['OrganizationSkillAnalytics.jsx', 'ComplianceManagement.jsx', 'DepartmentComparison.jsx', 'WorkforcePlanning.jsx'];
+      hrFiles.forEach(fileName => {
+        const filePath = path.join(frontendDir, fileName);
+        assert.ok(fs.existsSync(filePath), `${fileName} must exist`);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        assert.ok(!content.includes('const mockDepartments ='), `No mockDepartments in ${fileName}`);
+        assert.ok(!content.includes('const dummyDepartments ='), `No dummyDepartments in ${fileName}`);
+      });
+    });
+
+    test('Company Admin & Super Admin components bind strictly to live database APIs', () => {
+      const adminFiles = ['UserRoleGovernance.jsx', 'CompanySkillTaxonomy.jsx', 'TenantManagement.jsx', 'AIModelConfiguration.jsx'];
+      adminFiles.forEach(fileName => {
+        const filePath = path.join(frontendDir, fileName);
+        assert.ok(fs.existsSync(filePath), `${fileName} must exist`);
+        const content = fs.readFileSync(filePath, 'utf-8');
+        assert.ok(!content.includes('const mockTenants ='), `No mockTenants in ${fileName}`);
+        assert.ok(!content.includes('const dummyTenants ='), `No dummyTenants in ${fileName}`);
+      });
+    });
   });
 });
