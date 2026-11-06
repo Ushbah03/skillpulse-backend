@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import morgan from 'morgan';
 import * as dotenv from 'dotenv';
 dotenv.config({ override: true });
@@ -13,13 +14,22 @@ import aiRoutes from './routes/aiRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import { handleStripeWebhook } from './controllers/paymentController.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { apiLimiter } from './middleware/rateLimiter.js';
 
 const app = express();
+
+// Security Headers via Helmet
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 app.use(cors({
   origin: true,
   credentials: true,
 }));
+
+// Apply general rate limiter to API routes
+app.use('/api', apiLimiter);
 
 // Stripe Webhook MUST be registered before express.json() to get the raw body
 app.post('/api/payment/webhook', express.raw({type: 'application/json'}), handleStripeWebhook);
