@@ -29,7 +29,7 @@ export const login = async (req, res, next) => {
       where: whereClause,
       include: {
         tenant: {
-          select: { id: true, name: true, slug: true, plan: true, status: true, logoUrl: true }
+          select: { id: true, name: true, slug: true, plan: true, status: true, logoUrl: true, maxUsers: true }
         },
         department: { select: { id: true, name: true } },
         team: { select: { id: true, name: true } }
@@ -191,6 +191,18 @@ export const register = async (req, res, next) => {
           message: `The ${tenant.name} workspace is on the STARTER plan, which does not support the ${role.replace('_', ' ')} role. Please request the Employee role.` 
         });
       }
+
+      // Enforce plan seat quota ceiling
+      if (!isNewWorkspace && tenant.maxUsers) {
+        const userCount = await prisma.user.count({ where: { tenantId: tenant.id } });
+        if (userCount >= tenant.maxUsers) {
+          return res.status(403).json({
+            success: false,
+            message: `Workspace seat quota reached (${userCount}/${tenant.maxUsers} seats used). Please contact your workspace administrator to upgrade the subscription plan.`,
+            code: 'SEAT_QUOTA_EXCEEDED'
+          });
+        }
+      }
     }
 
     const existingUser = await prisma.user.findUnique({
@@ -273,7 +285,7 @@ export const getMe = async (req, res, next) => {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: {
-        tenant: { select: { id: true, name: true, slug: true, plan: true, domain: true, logoUrl: true } },
+        tenant: { select: { id: true, name: true, slug: true, plan: true, domain: true, logoUrl: true, maxUsers: true } },
         department: true,
         team: true,
         skills: {

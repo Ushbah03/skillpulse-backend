@@ -35,6 +35,22 @@ export const createUser = async (req, res, next) => {
     }
     // ────────────────────────────────────────────────────────────────────────
 
+    // ─── SEAT QUOTA LIMIT ENFORCEMENT ────────────────────────────────────────
+    if (tenantId) {
+      const tenantQuota = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { maxUsers: true, plan: true, name: true, _count: { select: { users: true } } }
+      });
+      if (tenantQuota && tenantQuota.maxUsers && tenantQuota._count.users >= tenantQuota.maxUsers) {
+        return res.status(403).json({
+          success: false,
+          message: `Workspace seat quota reached (${tenantQuota._count.users}/${tenantQuota.maxUsers} seats used on ${tenantQuota.plan || 'Starter'} plan). Upgrade your subscription to add more members.`,
+          code: 'SEAT_QUOTA_EXCEEDED'
+        });
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     const nameParts = name.trim().split(' ');
     const firstName = nameParts[0] || 'User';
     const lastName = nameParts.slice(1).join(' ') || 'Member';

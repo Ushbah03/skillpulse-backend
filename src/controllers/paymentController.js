@@ -6,6 +6,14 @@ const getSanitizedStripeKey = () => {
   return rawKey.replace(/^["']|["']$/g, '').trim();
 };
 
+const getStripeInstance = () => {
+  const secretKey = getSanitizedStripeKey();
+  if (!secretKey || secretKey.includes('dummy') || !secretKey.startsWith('sk_')) {
+    return null;
+  }
+  return new Stripe(secretKey);
+};
+
 export const createCheckoutSession = async (req, res, next) => {
   try {
     const { tenantId, plan, seats } = req.body;
@@ -22,10 +30,9 @@ export const createCheckoutSession = async (req, res, next) => {
 
     const clientUrl = (req.headers.origin || process.env.CLIENT_URL || 'https://skillpulse-ai.vercel.app').replace(/\/$/, '');
 
-    const secretKey = getSanitizedStripeKey();
-    if (secretKey && secretKey.startsWith('sk_') && !secretKey.includes('dummy')) {
+    const stripe = getStripeInstance();
+    if (stripe) {
       try {
-        const stripe = new Stripe(secretKey);
         const session = await stripe.checkout.sessions.create({
           payment_method_types: ['card'],
           mode: 'subscription',
@@ -109,18 +116,23 @@ export const verifyCheckoutSession = async (req, res, next) => {
     const { session_id } = req.query;
     if (!session_id) return res.status(400).json({ success: false, message: 'Session ID is required' });
 
+    const stripe = getStripeInstance();
+    if (!stripe) {
+      return res.status(503).json({ success: false, message: 'Stripe service is not configured' });
+    }
+
     const session = await stripe.checkout.sessions.retrieve(session_id);
     if (session.payment_status === 'paid') {
-      const tenantId = session.metadata.tenantId;
-      const plan = session.metadata.plan;
-      const seats = parseInt(session.metadata.seats);
+      const tenantId = session.metadata?.tenantId;
+      const plan = session.metadata?.plan;
+      const seats = parseInt(session.metadata?.seats || '30');
 
       if (tenantId) {
         await prisma.tenant.update({
           where: { id: tenantId },
           data: {
-            stripeCustomerId: session.customer,
-            stripeSubscriptionId: session.subscription,
+            stripeCustomerId: typeof session.customer === 'string' ? session.customer : undefined,
+            stripeSubscriptionId: typeof session.subscription === 'string' ? session.subscription : undefined,
             plan: plan === 'Enterprise AI' ? 'ENTERPRISE' : plan === 'Starter' ? 'STARTER' : 'PRO',
             maxUsers: seats,
             status: 'ACTIVE'
@@ -141,12 +153,34 @@ export const handleStripeWebhook = async (req, res, next) => {
   const sig = req.headers['stripe-signature'];
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+  if (!sig || !endpointSecret) {
+    return res.status(400).json({ success: false, message: 'Webhook signature or secret missing' });
+  }
+
+  const stripe = getStripeInstance();
+  if (!stripe) {
+    return res.status(503).json({ success: false, message: 'Stripe service is not configured' });
+  }
+
   let event;
   try {
-    event = stripe.webhooks.constructEvent(req.rawBody, sig, endpointSecret);
+    const rawBody = req.rawBody || req.body;
+    event = stripe.webhooks.constructEvent(rawBody, sig, endpointSecret);
   } catch (err) {
-    console.error(`Webhook Error: ${err.message}`);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
+    console.error(`Webhook Signature Error: ${err.message}`);
+    return res.status(400).json({ success: false, message: `Webhook Signature Verification Failed: ${err.message}` });
+  }
+
+  // Idempotency: Prevent duplicate processing if Stripe sends the same webhook retry
+  const existingLog = await prisma.auditLog.findFirst({
+    where: {
+      action: 'STRIPE_EVENT_PROCESSED',
+      resourceId: event.id
+    }
+  });
+
+  if (existingLog) {
+    return res.json({ received: true, idempotent: true, message: 'Event already processed' });
   }
 
   // Handle Stripe Webhook Events
@@ -155,14 +189,14 @@ export const handleStripeWebhook = async (req, res, next) => {
       const session = event.data.object;
       const tenantId = session.client_reference_id || session.metadata?.tenantId;
       const plan = session.metadata?.plan;
-      const seats = parseInt(session.metadata?.seats || '100');
+      const seats = parseInt(session.metadata?.seats || '30');
 
       if (tenantId) {
         await prisma.tenant.update({
           where: { id: tenantId },
           data: {
-            stripeCustomerId: session.customer,
-            stripeSubscriptionId: session.subscription,
+            stripeCustomerId: typeof session.customer === 'string' ? session.customer : undefined,
+            stripeSubscriptionId: typeof session.subscription === 'string' ? session.subscription : undefined,
             plan: plan === 'Enterprise AI' ? 'ENTERPRISE' : plan === 'Starter' ? 'STARTER' : 'PRO',
             maxUsers: seats,
             status: 'ACTIVE'
@@ -173,7 +207,7 @@ export const handleStripeWebhook = async (req, res, next) => {
     }
 
     case 'invoice.payment_failed': {
-      // Automatic monthly charge failed (declined card, insufficient funds) -> Set status to PENDING_PAYMENT (Past Due)
+      // Automatic monthly charge failed (declined card, insufficient funds) -> Set status to PENDING_PAYMENT
       const invoice = event.data.object;
       const stripeCustomerId = invoice.customer;
 
@@ -216,6 +250,20 @@ export const handleStripeWebhook = async (req, res, next) => {
 
     default:
       console.log(`Unhandled Stripe event type: ${event.type}`);
+  }
+
+  // Record audit log for idempotency
+  const auditTenant = await prisma.tenant.findFirst({ where: { status: 'ACTIVE' } });
+  if (auditTenant) {
+    await prisma.auditLog.create({
+      data: {
+        tenantId: auditTenant.id,
+        action: 'STRIPE_EVENT_PROCESSED',
+        resource: 'PaymentEvent',
+        resourceId: event.id,
+        details: { type: event.type }
+      }
+    });
   }
 
   res.json({ received: true });
