@@ -76,6 +76,15 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/payment', paymentRoutes);
 
+// Catch-all 404 Handler for undefined API routes
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `API endpoint '${req.method} ${req.originalUrl}' not found.`,
+    code: 'ROUTE_NOT_FOUND'
+  });
+});
+
 // Global Error Handler
 app.use(errorHandler);
 
