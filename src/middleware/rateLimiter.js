@@ -18,6 +18,13 @@ export const authLimiter = rateLimit({
   max: 50, // Limit each IP to 50 login/recovery attempts per window
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    // In non-production testing, allow legitimate E2E test suites to bypass rate limit
+    if (process.env.NODE_ENV !== 'production' && req.headers['x-playwright-test'] === 'skillpulse-e2e') {
+      return true;
+    }
+    return false;
+  },
   message: {
     success: false,
     message: 'Too many authentication attempts from this IP. Please wait 15 minutes before trying again.'
