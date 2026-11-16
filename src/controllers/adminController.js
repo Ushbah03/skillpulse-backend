@@ -6,8 +6,14 @@ import { generateAiCompletion } from '../services/aiService.js';
 
 export const createUser = async (req, res, next) => {
   try {
-    const { name, email, password = 'Password123!', role = 'EMPLOYEE', dept, tenantId: bodyTenantId } = req.body;
+    const { password = 'Password123!', role = 'EMPLOYEE', tenantId: bodyTenantId } = req.body;
     let tenantId = req.user.role === 'SUPER_ADMIN' ? (bodyTenantId || req.tenantId) : req.tenantId;
+
+    const firstName = (req.body.firstName || (req.body.name ? req.body.name.trim().split(' ')[0] : 'User')).trim();
+    const lastName = (req.body.lastName || (req.body.name ? req.body.name.trim().split(' ').slice(1).join(' ') : 'Member')).trim();
+    const name = (req.body.name || `${firstName} ${lastName}`).trim();
+    const email = req.body.email ? req.body.email.toLowerCase().trim() : '';
+    const dept = req.body.dept || req.body.department || 'General';
 
     if (!email || !name) {
       return res.status(400).json({ success: false, message: 'Name and email are required.' });
@@ -50,10 +56,6 @@ export const createUser = async (req, res, next) => {
       }
     }
     // ────────────────────────────────────────────────────────────────────────
-
-    const nameParts = name.trim().split(' ');
-    const firstName = nameParts[0] || 'User';
-    const lastName = nameParts.slice(1).join(' ') || 'Member';
 
     const existing = await prisma.user.findFirst({
       where: { tenantId, email: email.toLowerCase().trim() }
@@ -154,8 +156,6 @@ export const createTenant = async (req, res, next) => {
   try {
     const { 
       name, 
-      slug, 
-      domain, 
       plan = 'PRO', 
       maxUsers = 250,
       adminEmail,
@@ -165,11 +165,12 @@ export const createTenant = async (req, res, next) => {
       adminLastName = 'Admin'
     } = req.body;
 
-    if (!name || !slug) {
-      return res.status(400).json({ success: false, message: 'Tenant name and slug are required.' });
-    }
+    const rawSlug = req.body.slug || req.body.workspaceSubdomain || req.body.domain || req.body.name || '';
+    const cleanSlug = rawSlug.toString().toLowerCase().trim().replace(/[^a-z0-9-]/g, '');
 
-    const cleanSlug = slug.toLowerCase().trim();
+    if (!name || !name.trim() || !cleanSlug) {
+      return res.status(400).json({ success: false, message: 'Tenant name and subdomain slug are required.' });
+    }
 
     // Check slug uniqueness
     const existingSlug = await prisma.tenant.findUnique({ where: { slug: cleanSlug } });
@@ -177,12 +178,28 @@ export const createTenant = async (req, res, next) => {
       return res.status(400).json({ success: false, message: `Tenant workspace slug '${cleanSlug}' already exists.` });
     }
 
+    // Determine clean custom domain (only if user provided an apex/custom domain with a dot)
+    let cleanDomain = null;
+    if (req.body.domain && typeof req.body.domain === 'string') {
+      const trimmedDomain = req.body.domain.trim().toLowerCase();
+      if (trimmedDomain.includes('.') && !trimmedDomain.endsWith('.skillpulse.ai')) {
+        cleanDomain = trimmedDomain;
+      }
+    }
+
+    if (cleanDomain) {
+      const existingDomain = await prisma.tenant.findUnique({ where: { domain: cleanDomain } });
+      if (existingDomain) {
+        return res.status(409).json({ success: false, message: `Domain '${cleanDomain}' already belongs to tenant '${existingDomain.name}'.` });
+      }
+    }
+
     // Default status for new tenant is PENDING_PAYMENT
     const newTenant = await prisma.tenant.create({
       data: {
-        name,
+        name: name.trim(),
         slug: cleanSlug,
-        domain: domain ? domain.trim() : `${cleanSlug}.com`,
+        domain: cleanDomain,
         plan,
         status: 'PENDING_PAYMENT',
         maxUsers: parseInt(maxUsers)
@@ -241,6 +258,10 @@ export const createTenant = async (req, res, next) => {
       adminCredentials 
     });
   } catch (error) {
+    if (error.code === 'P2002') {
+      const target = error.meta?.target ? ` (${Array.isArray(error.meta.target) ? error.meta.target.join(', ') : error.meta.target})` : '';
+      return res.status(409).json({ success: false, message: `A duplicate record with unique field${target} already exists.` });
+    }
     next(error);
   }
 };
