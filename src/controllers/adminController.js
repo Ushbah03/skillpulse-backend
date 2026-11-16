@@ -510,10 +510,10 @@ export const deleteUser = async (req, res, next) => {
 export const getSkillTaxonomy = async (req, res, next) => {
   try {
     const isSuper = req.user?.role === 'SUPER_ADMIN';
-    const tenantId = isSuper ? (req.query?.tenantId || req.tenantId) : req.tenantId;
+    const tenantId = isSuper ? (req.query?.tenantId && req.query.tenantId !== 'ALL' ? req.query.tenantId : null) : req.tenantId;
 
     const categories = await prisma.skillCategory.findMany({
-      where: isSuper ? {} : {
+      where: isSuper && !tenantId ? {} : {
         OR: [
           { tenantId },
           {
@@ -531,7 +531,7 @@ export const getSkillTaxonomy = async (req, res, next) => {
       },
       include: {
         skills: {
-          where: isSuper ? {} : {
+          where: isSuper && !tenantId ? {} : {
             OR: [
               { tenantId },
               { userSkills: { some: { user: { tenantId } } } },
@@ -746,14 +746,21 @@ export const deleteSkill = async (req, res, next) => {
     // Check if skill is actively in use (Documented in 6.3.4 Manage Skill Taxonomy: Skill in Use -> Block & Show Warning)
     const linkedUsers = existingSkill._count?.userSkills || 0;
     const linkedGaps = existingSkill._count?.skillGaps || 0;
+    const forceDelete = isSuper && (req.query.force === 'true' || req.body?.force === true);
 
-    if (linkedUsers > 0 || linkedGaps > 0) {
+    if ((linkedUsers > 0 || linkedGaps > 0) && !forceDelete) {
       return res.status(400).json({
         success: false,
         message: `Cannot delete skill actively linked to users or assessments. It is linked to ${linkedUsers} active user profile(s) and ${linkedGaps} skill gap(s). Please unlink or reassign them before deletion.`
       });
     }
 
+    if (linkedUsers > 0) {
+      await prisma.userSkill.deleteMany({ where: { skillId: id } });
+    }
+    if (linkedGaps > 0) {
+      await prisma.skillGap.deleteMany({ where: { skillId: id } });
+    }
     if (existingSkill._count?.courseSkills > 0) {
       await prisma.courseSkill.deleteMany({ where: { skillId: id } });
     }
