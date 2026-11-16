@@ -248,14 +248,47 @@ export const createTenant = async (req, res, next) => {
 export const updateTenant = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status, plan, maxUsers, name, domain } = req.body;
+    const { status, plan, maxUsers, name, domain, slug } = req.body;
 
     const updateData = {};
     if (status) updateData.status = status;
     if (plan) updateData.plan = plan;
     if (maxUsers) updateData.maxUsers = parseInt(maxUsers);
-    if (name) updateData.name = name;
-    if (domain !== undefined) updateData.domain = domain;
+    if (name) updateData.name = name.trim();
+
+    if (slug) {
+      const cleanSlug = slug.toString().toLowerCase().trim().replace(/[^a-z0-9-]/g, '');
+      if (cleanSlug) {
+        const existingSlug = await prisma.tenant.findFirst({
+          where: {
+            slug: cleanSlug,
+            id: { not: id }
+          }
+        });
+        if (existingSlug) {
+          return res.status(409).json({ success: false, message: `Tenant workspace slug '${cleanSlug}' is already taken.` });
+        }
+        updateData.slug = cleanSlug;
+      }
+    }
+
+    if (domain !== undefined) {
+      const cleanDomain = (domain && typeof domain === 'string') ? domain.trim().toLowerCase() : null;
+      if (cleanDomain && cleanDomain !== '') {
+        const existingDomain = await prisma.tenant.findFirst({
+          where: {
+            domain: cleanDomain,
+            id: { not: id }
+          }
+        });
+        if (existingDomain) {
+          return res.status(409).json({ success: false, message: `Domain '${cleanDomain}' is already assigned to tenant '${existingDomain.name}'.` });
+        }
+        updateData.domain = cleanDomain;
+      } else {
+        updateData.domain = null;
+      }
+    }
 
     const updated = await prisma.tenant.update({
       where: { id },
@@ -275,6 +308,10 @@ export const updateTenant = async (req, res, next) => {
 
     res.json({ success: true, message: 'Tenant updated.', data: updated });
   } catch (error) {
+    if (error.code === 'P2002') {
+      const target = error.meta?.target ? ` (${Array.isArray(error.meta.target) ? error.meta.target.join(', ') : error.meta.target})` : '';
+      return res.status(409).json({ success: false, message: `A duplicate record with unique field${target} already exists.` });
+    }
     next(error);
   }
 };
