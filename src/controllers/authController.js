@@ -139,7 +139,10 @@ export const login = async (req, res, next) => {
 
 export const register = async (req, res, next) => {
   try {
-    const { email, password, firstName, lastName, tenantSlug, organizationName, isNewWorkspace, role = 'EMPLOYEE', jobTitle } = req.body;
+    const { email, password, firstName, lastName, isNewWorkspace, jobTitle } = req.body;
+    const organizationName = (req.body.organizationName || '').trim();
+    const tenantSlug = (req.body.tenantSlug || req.body.workspaceSubdomain || req.body.inviteCode || '').toString().trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+    const role = req.body.role || req.body.requestedRole || 'EMPLOYEE';
 
     if (!email || !password || !firstName || !lastName) {
       return res.status(400).json({ success: false, message: 'Missing required registration fields.' });
@@ -163,13 +166,24 @@ export const register = async (req, res, next) => {
         }
       }
 
+      const planRaw = (req.body.plan || 'STARTER').toUpperCase();
+      let plan = 'STARTER';
+      let maxUsers = 30;
+      if (planRaw.includes('ENTERPRISE')) {
+        plan = 'ENTERPRISE';
+        maxUsers = 1000;
+      } else if (planRaw.includes('PRO')) {
+        plan = 'PRO';
+        maxUsers = 250;
+      }
+
       // Create new tenant in PENDING_PAYMENT state
       tenant = await prisma.tenant.create({
         data: {
           name: organizationName,
           slug: tenantSlug,
-          plan: 'STARTER',
-          maxUsers: 30,
+          plan,
+          maxUsers,
           status: 'PENDING_PAYMENT',
         }
       });
