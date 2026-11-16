@@ -241,14 +241,17 @@ export const createTenant = async (req, res, next) => {
     }
 
     // Audit log
+    const actorId = req.user?.id || req.user?.userId || null;
     await prisma.auditLog.create({
       data: {
         tenantId: newTenant.id,
-        userId: req.user?.userId || newTenant.id,
+        userId: actorId,
         action: `TENANT_CREATED: ${newTenant.name}`,
         resource: 'Tenant',
         details: { name: newTenant.name, plan, status: 'PENDING_PAYMENT', adminEmail }
       }
+    }).catch((err) => {
+      console.warn('Audit log creation for tenant skipped:', err.message);
     });
 
     res.status(201).json({ 
