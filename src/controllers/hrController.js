@@ -1053,6 +1053,8 @@ export const getSuccessionPipelines = async (req, res, next) => {
 export const getComplianceStatus = async (req, res, next) => {
   try {
     const tenantId = req.tenantId;
+    const parsedClientDate = req.query?.clientDate ? new Date(req.query.clientDate) : null;
+    const effectiveNow = parsedClientDate && !isNaN(parsedClientDate.getTime()) ? parsedClientDate : new Date();
 
     const complianceItems = await prisma.complianceRecord.findMany({
       where: { tenantId },
@@ -1070,6 +1072,22 @@ export const getComplianceStatus = async (req, res, next) => {
       },
       orderBy: { dueDate: 'asc' }
     });
+
+    for (const item of complianceItems) {
+      if (item.dueDate) {
+        const due = new Date(item.dueDate);
+        const diffDays = Math.ceil((due - effectiveNow) / (1000 * 60 * 60 * 24));
+        const computedStatus = diffDays < 0 ? 'EXPIRED' : diffDays <= 30 ? 'PENDING' : 'COMPLIANT';
+        if (item.status !== computedStatus) {
+          item.status = computedStatus;
+          await prisma.complianceRecord.update({
+            where: { id: item.id },
+            data: { status: computedStatus }
+          }).catch(() => {});
+        }
+        item.daysRemaining = diffDays;
+      }
+    }
 
     const total = complianceItems.length;
     const compliant = complianceItems.filter(r => r.status === 'COMPLIANT').length;
